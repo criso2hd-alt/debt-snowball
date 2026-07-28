@@ -384,7 +384,22 @@ function DataManager({
   );
 }
 
+/**
+ * Holds one stream open for as long as this window exists. The server stops
+ * itself when the last of these goes away, so closing the browser closes the
+ * app instead of leaving it listening in the background. EventSource
+ * reconnects on its own, so a reload is only a brief gap.
+ */
+function useKeepServerAlive() {
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    const stream = new EventSource("/api/heartbeat");
+    return () => stream.close();
+  }, []);
+}
+
 function LocalApp() {
+  useKeepServerAlive();
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [sharedState, setSharedState] = useState<DebtState | null>(null);

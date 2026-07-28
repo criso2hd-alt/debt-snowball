@@ -20,7 +20,20 @@ Two packages are provided:
 
 The launcher applies an ad-hoc local signature, starts the private-network
 server, and opens the dashboard in the default browser. Keep the Terminal
-window open. Press Control-C or close that window to stop the application.
+window open while you are using the app.
+
+## Stop the application
+
+**Close the app in your browser and the server stops on its own** about fifteen
+seconds later, leaving nothing running in the background. The delay is there so
+a page reload does not stop it, and it stays up while anyone else on your
+network still has the app open.
+
+You can also press Control-C in the Terminal window, or close that window.
+
+If no browser window connects within two minutes of launch, the server stops.
+To run it as an always-on server for your network, start it with
+`--keep-running`, which disables the automatic stop.
 
 The package is built from the official Node.js macOS binary, but the final app
 is not signed with an Apple Developer ID. macOS may therefore ask for

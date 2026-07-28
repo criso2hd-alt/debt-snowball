@@ -19,7 +19,7 @@
     "start:local": "npm run build:local-runtime && node local-dist/server.cjs",
     "build:exe": "node scripts/build-local-exe.mjs",
     "build:mac": "node scripts/build-mac-executables.mjs",
-    "test:local": "npm run build:local-runtime && node --test tests/local-server.test.mjs",
+    "test:local": "npm run build:local-runtime && node --test tests/local-server.test.mjs tests/lifecycle.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"

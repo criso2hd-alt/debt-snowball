@@ -110,8 +110,48 @@ const executableDirectory = isSea()
 const portableDataPath = join(executableDirectory, "DebtSquasherData.dat");
 const developmentClientDirectory = resolve(process.cwd(), "local-dist", "client");
 
+/**
+ * Every open window holds a /api/heartbeat stream. When the last one goes away
+ * the server stops itself, so closing the browser does not leave a process
+ * listening in the background.
+ *
+ * On by default. --no-open implies a headless launch where no window was ever
+ * expected, so it turns this off unless --auto-stop asks for it back.
+ * --keep-running always wins: that is an intentional always-on LAN server.
+ */
+const autoStopEnabled = !args.has("--keep-running")
+  && (args.has("--auto-stop") || !args.has("--no-open"));
+function graceMs(variable: string, fallback: number): number {
+  const value = Number(process.env[variable]);
+  return Number.isFinite(value) && value >= 250 && value <= 3_600_000 ? value : fallback;
+}
+
+/** How long to wait for the first window before giving up on one arriving. */
+const FIRST_WINDOW_GRACE_MS = graceMs("DEBT_SQUASHER_FIRST_WINDOW_GRACE_MS", 2 * 60 * 1000);
+/** Long enough to survive a page reload, short enough to feel like quitting. */
+const IDLE_GRACE_MS = graceMs("DEBT_SQUASHER_IDLE_GRACE_MS", 15 * 1000);
+/** Bounds the memory an unauthenticated caller can pin by opening streams. */
+const MAX_OPEN_WINDOWS = 64;
+
+const openWindows = new Set<ServerResponse>();
+let idleTimer: NodeJS.Timeout | null = null;
+let stopServer: ((reason: string) => void) | null = null;
+
 let store: Store;
 let saveQueue = Promise.resolve();
+
+function cancelIdleTimer(): void {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+}
+
+function startIdleTimer(delay: number, reason: string): void {
+  if (!autoStopEnabled) return;
+  cancelIdleTimer();
+  idleTimer = setTimeout(() => stopServer?.(reason), delay);
+}
 
 function passwordKey(password: string, salt: string): Promise<Buffer> {
   return new Promise((resolveKey, reject) => {
@@ -425,6 +465,34 @@ async function handleApi(
   const method = request.method ?? "GET";
   if (!["GET", "HEAD"].includes(method) && !mutationIsSameOrigin(request)) {
     throw new HttpError(403, "Cross-origin request rejected.");
+  }
+
+  // Deliberately unauthenticated: someone sitting on the sign-in screen still
+  // has a window open, and shutting down underneath them would be wrong.
+  if (pathname === "/api/heartbeat" && method === "GET") {
+    if (openWindows.size >= MAX_OPEN_WINDOWS) {
+      throw new HttpError(503, "Too many open windows.");
+    }
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+    });
+    response.write(": open\n\n");
+    openWindows.add(response);
+    cancelIdleTimer();
+
+    // Traffic keeps proxies and idle-connection reapers from closing the stream.
+    const ping = setInterval(() => response.write(": ping\n\n"), 25_000);
+    const released = () => {
+      clearInterval(ping);
+      if (openWindows.delete(response) && openWindows.size === 0) {
+        startIdleTimer(IDLE_GRACE_MS, "the last window was closed");
+      }
+    };
+    request.once("close", released);
+    response.once("close", released);
+    return true;
   }
 
   if (pathname === "/api/auth/login" && method === "POST") {
@@ -788,16 +856,38 @@ async function start(): Promise<void> {
   if (store.users.some((user) => user.username === "admin" && user.mustChangePassword)) {
     console.log("\nFirst sign-in:\n  Username: admin\n  Password: admin\n  You must choose a new password immediately.");
   }
-  console.log("\nKeep this window open. Press Ctrl+C or close it to stop the server.");
+  if (autoStopEnabled) {
+    console.log("\nThis window closes on its own once you close the app in your browser.");
+    console.log("Press Ctrl+C to stop it now, or start with --keep-running to leave it up.");
+  } else {
+    console.log("\nKeep this window open. Press Ctrl+C or close it to stop the server.");
+  }
   console.log("If Windows Firewall asks, allow access on Private networks only.\n");
   openBrowser(localUrl);
 
-  const shutdown = () => {
-    console.log("\nStopping Debt Squasher…");
+  let stopping = false;
+  const shutdown = (reason: string) => {
+    if (stopping) return;
+    stopping = true;
+    cancelIdleTimer();
+    console.log(`\nStopping Debt Squasher — ${reason}…`);
+
+    // Heartbeat streams never end on their own, so close() would wait forever.
+    for (const window of openWindows) window.end();
+    openWindows.clear();
     server.close(() => process.exit(0));
+    server.closeAllConnections?.();
+    setTimeout(() => process.exit(0), 2000).unref();
   };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
+
+  stopServer = shutdown;
+  process.once("SIGINT", () => shutdown("you pressed Ctrl+C"));
+  process.once("SIGTERM", () => shutdown("the system asked it to stop"));
+  process.once("SIGHUP", () => shutdown("this window was closed"));
+  process.once("SIGBREAK", () => shutdown("this window was closed"));
+
+  // If the browser never reaches the server there is nothing to wait for.
+  startIdleTimer(FIRST_WINDOW_GRACE_MS, "no browser window ever connected");
 }
 
 void start().catch((error) => {

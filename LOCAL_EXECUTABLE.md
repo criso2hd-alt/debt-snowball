@@ -10,7 +10,33 @@
 The console also prints one or more private-network addresses. Other people on
 the same Wi-Fi or Ethernet network can open one of those addresses in a browser.
 
-Closing the console window stops the server.
+## Stop the application
+
+**Close the app in your browser and the server stops on its own** about fifteen
+seconds later. The console window closes with it. Nothing is left running in
+the background.
+
+The delay exists so that reloading the page does not stop the server. If other
+people on your network still have the app open, it stays up until the last of
+them closes it too.
+
+You can also stop it directly at any time by pressing `Ctrl+C` in the console
+window, or by closing that window.
+
+If no browser window connects within two minutes of launch, the server assumes
+it was started by mistake and stops.
+
+### Leaving it running on purpose
+
+To run it as an always-on server for your network — no browser open on the host
+machine — start it from a terminal with:
+
+```text
+DebtSquasher.exe --keep-running
+```
+
+That disables the automatic stop entirely. Use `Ctrl+C` or close the window to
+stop it.
 
 ## First sign-in
 
