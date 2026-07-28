@@ -94,11 +94,13 @@ test("protects and shares LAN data across managed users", async (context) => {
       state: {
         ...initialState.payload.state,
         extra: 333,
+        strategy: "avalanche",
       },
     },
   });
   assert.equal(savedState.response.status, 200);
   assert.equal(savedState.payload.state.extra, 333);
+  assert.equal(savedState.payload.state.strategy, "avalanche");
 
   const savedFile = await request(baseUrl, "/api/data-file/save", {
     method: "POST",
@@ -113,7 +115,7 @@ test("protects and shares LAN data across managed users", async (context) => {
     cookie: adminCookie,
   });
   assert.equal(resetState.response.status, 200);
-  assert.deepEqual(resetState.payload.state, { debts: [], extra: 0 });
+  assert.deepEqual(resetState.payload.state, { debts: [], extra: 0, strategy: "snowball" });
 
   const restoredState = await request(baseUrl, "/api/data-file/load", {
     method: "POST",
@@ -121,6 +123,7 @@ test("protects and shares LAN data across managed users", async (context) => {
   });
   assert.equal(restoredState.response.status, 200);
   assert.equal(restoredState.payload.state.extra, 333);
+  assert.equal(restoredState.payload.state.strategy, "avalanche");
 
   const created = await request(baseUrl, "/api/users", {
     method: "POST",

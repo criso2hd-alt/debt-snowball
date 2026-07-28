@@ -36,6 +36,7 @@ type Debt = {
 type DebtState = {
   debts: Debt[];
   extra: number;
+  strategy: "snowball" | "avalanche";
 };
 
 type StoredUser = {
@@ -73,6 +74,7 @@ class HttpError extends Error {
 const DEFAULT_STATE: DebtState = {
   debts: [],
   extra: 0,
+  strategy: "snowball",
 };
 
 const SESSION_COOKIE = "debt_squasher_session";
@@ -291,6 +293,7 @@ function validateState(value: unknown): DebtState {
   return {
     debts,
     extra: finiteNumber(candidate.extra, "Monthly snowball", 0, 10_000_000),
+    strategy: candidate.strategy === "avalanche" ? "avalanche" : "snowball",
   };
 }
 
@@ -555,7 +558,7 @@ async function handleApi(
 
   if (pathname === "/api/data-file/reset" && method === "POST") {
     requireAdmin(request);
-    store.state = { debts: [], extra: 0 };
+    store.state = { debts: [], extra: 0, strategy: "snowball" };
     store.version += 1;
     store.updatedAt = new Date().toISOString();
     await persistStore();

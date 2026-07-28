@@ -1,155 +1,231 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import TrajectoryChart, { type Series } from "./components/TrajectoryChart";
+import Schedule from "./components/Schedule";
+import {
+  type Debt,
+  type Plan,
+  type Strategy,
+  balanceSeries,
+  buildPlan,
+  dueLabel,
+  formatDuration,
+  formatMonth,
+  milestones,
+  milestonesByDate,
+  monthActions,
+  nextDueDate,
+  payoffDate,
+} from "./lib/plan";
 
-export type Debt = {
-  id: number;
-  name: string;
-  balance: number;
-  original: number;
-  apr: number;
-  minimum: number;
-  dueDay: number;
-  accent: string;
-  mark: string;
-};
+export type { Debt } from "./lib/plan";
 
 export type DebtState = {
   debts: Debt[];
   extra: number;
+  strategy?: Strategy;
 };
-
-type Projection = {
-  months: number;
-  interest: number;
-  points: number[];
-};
-
-const DEFAULT_DEBTS: Debt[] = [];
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   maximumFractionDigits: 0,
 });
+const money2 = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const dayMonth = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
-function simulate(debts: Debt[], extra: number): Projection {
-  const items = debts
-    .filter((debt) => debt.balance > 0)
-    .map((debt) => ({ ...debt }));
-  const monthlyBudget = items.reduce((sum, debt) => sum + debt.minimum, 0) + extra;
-  const points = [items.reduce((sum, debt) => sum + debt.balance, 0)];
-  let interest = 0;
-  let months = 0;
+const STRATEGY_COPY: Record<Strategy, { name: string; rule: string; why: string }> = {
+  snowball: {
+    name: "Snowball",
+    rule: "Smallest balance first",
+    why: "You clear accounts sooner, so the plan feels like it is working early on.",
+  },
+  avalanche: {
+    name: "Avalanche",
+    rule: "Highest APR first",
+    why: "You pay the least interest overall, but the first win takes longer to arrive.",
+  },
+};
 
-  while (items.some((debt) => debt.balance > 0.01) && months < 600) {
-    months += 1;
-    let available = monthlyBudget;
-
-    items.forEach((debt) => {
-      if (debt.balance <= 0) return;
-      const charge = debt.balance * (debt.apr / 100 / 12);
-      debt.balance += charge;
-      interest += charge;
-    });
-
-    items.forEach((debt) => {
-      if (debt.balance <= 0) return;
-      const payment = Math.min(debt.minimum, debt.balance, available);
-      debt.balance -= payment;
-      available -= payment;
-    });
-
-    for (const debt of [...items].sort((a, b) => a.balance - b.balance)) {
-      if (available <= 0 || debt.balance <= 0) continue;
-      const payment = Math.min(available, debt.balance);
-      debt.balance -= payment;
-      available -= payment;
-    }
-
-    if (months === 1 || months % 3 === 0 || items.every((debt) => debt.balance <= 0.01)) {
-      points.push(Math.max(0, items.reduce((sum, debt) => sum + debt.balance, 0)));
-    }
-  }
-
-  return { months, interest, points };
-}
-
-function payoffDate(months: number) {
-  const date = new Date();
-  date.setMonth(date.getMonth() + months);
-  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-}
-
-function dueLabel(day: number) {
-  const now = new Date();
-  const due = new Date(now.getFullYear(), now.getMonth(), day);
-  if (due < now) due.setMonth(due.getMonth() + 1);
-  const days = Math.max(0, Math.ceil((due.getTime() - now.getTime()) / 86400000));
-  return days === 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`;
-}
-
-function Icon({ children }: { children: React.ReactNode }) {
+function Icon({ children }: { children: ReactNode }) {
   return <span className="icon" aria-hidden="true">{children}</span>;
 }
 
-function TrajectoryChart({
-  base,
-  faster,
-}: {
-  base: Projection;
-  faster: Projection;
-}) {
-  const width = 660;
-  const height = 260;
-  const padX = 38;
-  const padY = 24;
-  const maxDebt = Math.max(base.points[0] || 1, faster.points[0] || 1);
-  const maxLen = Math.max(base.points.length, faster.points.length, 2);
+/**
+ * The browser's clock, read only after hydration. The server renders in its own
+ * timezone, so baking a date into the HTML would mismatch on the client.
+ */
+let clientNow: Date | null = null;
+const subscribeToNothing = () => () => {};
+function useClientNow() {
+  return useSyncExternalStore(
+    subscribeToNothing,
+    () => (clientNow ??= new Date()),
+    () => null,
+  );
+}
 
-  const pathFor = (points: number[]) =>
-    points
-      .map((value, index) => {
-        const x = padX + (index / (maxLen - 1)) * (width - padX * 1.5);
-        const y = padY + (1 - value / maxDebt) * (height - padY * 2);
-        return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(" ");
+function greeting(now: Date) {
+  const hour = now.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
-  const basePath = pathFor(base.points);
-  const fastPath = pathFor(faster.points);
-  const baseEnd = padX + ((base.points.length - 1) / (maxLen - 1)) * (width - padX * 1.5);
+/** The one number people actually want: when this ends. */
+function finishLabel(plan: Plan) {
+  const date = payoffDate(plan);
+  if (!date) return "Not reachable yet";
+  return formatMonth(date);
+}
 
+/**
+ * Lifetime totals only mean something for a plan that finishes. A stalled plan
+ * has walked a couple of months before bailing out, and printing that partial
+ * sum as "interest ahead" would badly understate the situation.
+ */
+function lifetimeLabel(plan: Plan, value: number, format: Intl.NumberFormat = money) {
+  if (plan.monthCount === 0) return format.format(0);
+  return plan.complete ? format.format(value) : "Unbounded";
+}
+
+function ProgressRing({ percent, size = "large" }: { percent: number; size?: "large" | "small" }) {
   return (
-    <div className="chart-wrap">
-      <svg className="trajectory" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Debt balance projection over time">
-        <defs>
-          <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#315BE8" stopOpacity=".24" />
-            <stop offset="100%" stopColor="#315BE8" stopOpacity=".02" />
-          </linearGradient>
-        </defs>
-        {[0, 1, 2, 3].map((line) => {
-          const y = padY + (line / 3) * (height - padY * 2);
-          return <line key={line} x1={padX} x2={width - 10} y1={y} y2={y} className="grid-line" />;
-        })}
-        <path d={`${basePath} L ${baseEnd} ${height - padY} L ${padX} ${height - padY} Z`} fill="url(#areaFill)" />
-        <path d={basePath} className="line base-line" pathLength="1" />
-        <path d={fastPath} className="line fast-line" pathLength="1" />
-        <circle cx={padX} cy={padY} r="5" className="start-dot" />
-        <text x="0" y={padY + 5} className="axis-label">{money.format(maxDebt)}</text>
-        <text x="15" y={height - padY + 5} className="axis-label">$0</text>
-        <text x={padX} y={height - 2} className="axis-label">Today</text>
-        <text x={width - 105} y={height - 2} className="axis-label">{payoffDate(base.months)}</text>
-      </svg>
+    <div
+      className={`progress-ring ${size}`}
+      style={{ "--progress": `${Math.max(0, Math.min(100, percent)) * 3.6}deg` } as React.CSSProperties}
+      role="img"
+      aria-label={`${percent}% of your starting balance is paid off`}
+    >
+      <div><strong>{percent}%</strong><span>paid off</span></div>
     </div>
   );
 }
 
-function DebtCard({ debt, focused, onEdit }: { debt: Debt; focused: boolean; onEdit: (debt: Debt) => void }) {
+/**
+ * Surfaces the two situations that silently produce nonsense forecasts:
+ * a budget too small to ever finish, and an account whose minimum does not
+ * even cover its own interest.
+ */
+function PlanWarnings({ plan, onFix }: { plan: Plan; onFix: () => void }) {
+  if (plan.monthCount === 0) return null;
+  const notes: { tone: "stop" | "warn"; title: string; body: string }[] = [];
+
+  if (!plan.complete) {
+    notes.push({
+      tone: "stop",
+      title: "These payments never clear the debt",
+      body: "The interest charged each month is at least as large as the total you are paying. The balance grows instead of shrinking. Raising the monthly amount — or lowering an APR — is what changes this.",
+    });
+  }
+
+  for (const debt of plan.stalled) {
+    notes.push({
+      tone: "warn",
+      title: `${debt.name}'s minimum does not cover its interest`,
+      body: `It falls short by about ${money2.format(debt.shortfall)} a month, so that balance grows while you focus elsewhere. The plan below accounts for it, but paying a little more on this account is worth considering.`,
+    });
+  }
+
+  if (notes.length === 0) return null;
+
+  return (
+    <div className="plan-warnings">
+      {notes.map((note) => (
+        <div key={note.title} className={`plan-warning ${note.tone}`}>
+          <span aria-hidden="true">{note.tone === "stop" ? "!" : "▲"}</span>
+          <div><strong>{note.title}</strong><p>{note.body}</p></div>
+          <button onClick={onFix}>Adjust payment</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** "What do I do this month" — the question the old dashboard never answered. */
+function ThisMonthPanel({
+  plan,
+  debts,
+  onOpenSchedule,
+}: {
+  plan: Plan;
+  debts: Debt[];
+  onOpenSchedule: () => void;
+}) {
+  const actions = useMemo(() => monthActions(plan, debts), [plan, debts]);
+  const total = actions.reduce((sum, action) => sum + action.amount, 0);
+
+  if (actions.length === 0) {
+    return (
+      <article className="panel month-panel">
+        <p className="card-label">THIS MONTH</p>
+        <h3 className="panel-title">Nothing scheduled yet</h3>
+        <p className="panel-note">Add an account and this becomes a checklist of exactly what to pay, and when.</p>
+      </article>
+    );
+  }
+
+  return (
+    <article className="panel month-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="card-label">THIS MONTH · {formatMonth(plan.months[0].date).toUpperCase()}</p>
+          <h3 className="panel-title">Pay these amounts</h3>
+        </div>
+        <div className="month-total">
+          <span>Total</span>
+          <strong>{money2.format(total)}</strong>
+        </div>
+      </div>
+
+      <ol className="month-actions">
+        {actions.map((action) => (
+          <li key={action.debt.id} style={{ "--accent": action.debt.accent } as React.CSSProperties}>
+            <span className="action-mark">{action.debt.mark}</span>
+            <div className="action-main">
+              <strong>{action.debt.name}</strong>
+              <span className="action-due">
+                {dayMonth.format(action.due)} · {dueLabel(action.due)}
+              </span>
+            </div>
+            <div className="action-amount">
+              <strong>{money2.format(action.amount)}</strong>
+              <span>
+                {action.extra > 0.004
+                  ? `${money.format(action.minimum)} minimum + ${money.format(action.extra)} snowball`
+                  : "minimum payment"}
+              </span>
+            </div>
+            {action.clears && <b className="action-clear">Clears it 🎉</b>}
+          </li>
+        ))}
+      </ol>
+
+      <div className="month-footer">
+        <p>
+          Of that {money2.format(total)}, <b>{money2.format(plan.months[0].interest)}</b> goes to interest and{" "}
+          <b>{money2.format(plan.months[0].principal)}</b> actually reduces what you owe.
+        </p>
+        <button className="btn-quiet" onClick={onOpenSchedule}>See every month →</button>
+      </div>
+    </article>
+  );
+}
+
+function DebtCard({ debt, plan, focused, onEdit }: { debt: Debt; plan: Plan; focused: boolean; onEdit: (debt: Debt) => void }) {
   const progress = debt.original > 0
     ? Math.max(0, Math.min(100, Math.round((1 - debt.balance / debt.original) * 100)))
     : 0;
+  const month = plan.payoffMonth[debt.id];
+  const clearDate = month ? formatMonth(plan.months[month - 1].date) : null;
+  const due = nextDueDate(debt.dueDay);
+
   return (
     <article className={`debt-card ${focused ? "focused" : ""}`} style={{ "--accent": debt.accent } as React.CSSProperties}>
       <div className="debt-card-top">
@@ -158,81 +234,139 @@ function DebtCard({ debt, focused, onEdit }: { debt: Debt; focused: boolean; onE
         <button className="more-button" onClick={() => onEdit(debt)} aria-label={`Edit ${debt.name}`}>•••</button>
       </div>
       <strong className="debt-balance">{money.format(debt.balance)}</strong>
-      <div className="apr-row"><span>APR {debt.apr.toFixed(2)}%</span>{focused && <span className="focus-pill">Snowball focus</span>}</div>
-      <div className="mini-track" aria-label={`${progress}% paid off`}>
-        <span style={{ width: `${progress}%` }} />
-      </div>
+      <p className="debt-apr">{debt.apr.toFixed(2)}% APR</p>
+      <div className="mini-track" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div>
       <p className="progress-label">{progress}% paid off</p>
-      <div className="debt-meta">
-        <span>Minimum <strong>{money.format(debt.minimum)}</strong></span>
-        <span>Due <strong style={{ color: debt.accent }}>Aug {String(debt.dueDay).padStart(2, "0")}</strong></span>
-      </div>
+      <dl className="debt-meta">
+        <div><dt>Minimum</dt><dd>{money.format(debt.minimum)}</dd></div>
+        <div><dt>Next due</dt><dd>{dayMonth.format(due)}</dd></div>
+        <div className="wide"><dt>Paid off by</dt><dd className="accent-value">{clearDate ?? "—"}</dd></div>
+      </dl>
     </article>
   );
 }
 
-function SecondaryView({
-  active,
-  debts,
-  extra,
-  total,
-  original,
-  paid,
-  progress,
-  projection,
-  fasterProjection,
-  onUpdate,
-  onSimulate,
-  onAddDebt,
-  onEditDebt,
-  sharedMode,
-}: {
+/** The order accounts get attacked, when each disappears, and what rolls next. */
+function MilestoneTimeline({ plan, debts }: { plan: Plan; debts: Debt[] }) {
+  const steps = useMemo(() => milestones(plan, debts), [plan, debts]);
+  if (steps.length === 0) return null;
+
+  return (
+    <ol className="timeline">
+      {steps.map((step, index) => {
+        const next = steps[index + 1];
+        // Only narrate a hand-off when the next target really does outlast this
+        // one — under avalanche a low-rate account can clear out of turn.
+        const rolls = next && next.month > step.month;
+        const clearsEarly = index > 0 && step.month < steps[index - 1].month;
+        return (
+          <li key={step.debt.id} className={index === 0 ? "current" : ""} style={{ "--accent": step.debt.accent } as React.CSSProperties}>
+            <div className="timeline-node">{index + 1}</div>
+            <div className="timeline-card">
+              <div className="timeline-lead">
+                <span className="timeline-stage">{index === 0 ? "PAYING NOW" : `NEXT UP ${index + 1}`}</span>
+                <strong>{step.debt.name}</strong>
+                <small>{money.format(step.debt.balance)} at {step.debt.apr.toFixed(2)}%</small>
+              </div>
+              <div>
+                <span>{index === 0 ? "You send this month" : "Payment once targeted"}</span>
+                <strong>{money2.format(index === 0 ? step.currentPayment : step.peakPayment)}</strong>
+              </div>
+              <div><span>Gone by</span><strong className="accent-value">{formatMonth(step.date)}</strong></div>
+              <div><span>Interest it costs</span><strong>{money.format(step.interestPaid)}</strong></div>
+            </div>
+            {clearsEarly && (
+              <p className="timeline-roll aside">
+                Small enough to finish on its own minimum before the account above it — no extra needed here.
+              </p>
+            )}
+            {rolls && (
+              <p className="timeline-roll">
+                ↓ Its {money2.format(step.debt.minimum)} minimum then rolls into <b>{next.debt.name}</b>, taking that payment to {money2.format(next.peakPayment)}.
+              </p>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+type ViewProps = {
   active: string;
   debts: Debt[];
   extra: number;
+  strategy: Strategy;
   total: number;
   original: number;
   paid: number;
   progress: number;
-  projection: Projection;
-  fasterProjection: Projection;
+  plan: Plan;
+  baseline: Plan;
+  faster: Plan;
+  alternative: Plan;
+  simExtra: number;
   onUpdate: () => void;
   onSimulate: () => void;
   onAddDebt: () => void;
   onEditDebt: (debt: Debt) => void;
+  onStrategyChange: (strategy: Strategy) => void;
+  onNavigate: (view: string) => void;
   sharedMode: boolean;
-}) {
+};
+
+function SecondaryView(props: ViewProps) {
+  const {
+    active, debts, extra, strategy, total, original, paid, progress,
+    plan, baseline, faster, alternative, simExtra,
+    onUpdate, onSimulate, onAddDebt, onEditDebt, onStrategyChange, onNavigate, sharedMode,
+  } = props;
+
   const [reminders, setReminders] = useState<Record<number, boolean>>(
     Object.fromEntries(debts.map((debt) => [debt.id, true])),
   );
-  const ordered = [...debts].sort((a, b) => a.balance - b.balance);
-  const monthsSaved = Math.max(0, projection.months - fasterProjection.months);
-  const interestSaved = Math.max(0, projection.interest - fasterProjection.interest);
-  const highestAprDebt = [...debts].sort((a, b) => b.apr - a.apr)[0];
 
-  if (active === "My Debts") {
+  const vsBaselineMonths = baseline.complete && plan.complete ? Math.max(0, baseline.monthCount - plan.monthCount) : 0;
+  const vsBaselineInterest = baseline.complete && plan.complete ? Math.max(0, baseline.totalInterest - plan.totalInterest) : 0;
+
+  if (active === "Accounts") {
+    const highestApr = [...debts].sort((a, b) => b.apr - a.apr)[0];
     return (
       <section className="workspace-view">
         <div className="view-toolbar">
-          <div><p className="eyebrow">{debts.length} ACTIVE {debts.length === 1 ? "ACCOUNT" : "ACCOUNTS"}</p><h2>Balances at a glance</h2><p>Update once a month. The plan recalculates instantly.</p></div>
+          <div>
+            <p className="eyebrow">{debts.length} ACTIVE {debts.length === 1 ? "ACCOUNT" : "ACCOUNTS"}</p>
+            <h2>Your balances</h2>
+            <p>Update these once a month, after each statement closes. Every forecast recalculates immediately.</p>
+          </div>
           <div className="view-toolbar-actions">
-            <button className="view-secondary" onClick={onAddDebt}>+ Add account</button>
-            <button className="view-primary" onClick={onUpdate} disabled={debts.length === 0}>↻ Update balances</button>
+            <button className="btn-secondary" onClick={onAddDebt}>+ Add account</button>
+            <button className="btn-primary" onClick={onUpdate} disabled={debts.length === 0}>Update balances</button>
           </div>
         </div>
+
         <div className="account-list">
           {debts.map((debt) => {
-            const debtProgress = Math.round((1 - debt.balance / debt.original) * 100);
+            const debtProgress = debt.original > 0
+              ? Math.max(0, Math.min(100, Math.round((1 - debt.balance / debt.original) * 100)))
+              : 0;
+            const month = plan.payoffMonth[debt.id];
+            const monthlyInterest = (debt.balance * debt.apr) / 1200;
             return (
               <article key={debt.id} style={{ "--accent": debt.accent } as React.CSSProperties}>
                 <span className="account-mark">{debt.mark}</span>
                 <div className="account-main">
-                  <div><strong>{debt.name}</strong><span>{debt.apr.toFixed(2)}% APR · due Aug {debt.dueDay}</span></div>
-                  <div className="account-progress"><span style={{ width: `${debtProgress}%` }} /></div>
+                  <div>
+                    <strong>{debt.name}</strong>
+                    <span>{debt.apr.toFixed(2)}% APR · due the {debt.dueDay}{ordinal(debt.dueDay)} · costs {money2.format(monthlyInterest)} in interest this month</span>
+                  </div>
+                  <div className="account-progress" aria-hidden="true"><span style={{ width: `${debtProgress}%` }} /></div>
                 </div>
-                <div className="account-stat"><span>Balance</span><strong>{money.format(debt.balance)}</strong></div>
-                <div className="account-stat"><span>Minimum</span><strong>{money.format(debt.minimum)}</strong></div>
-                <div className="account-stat paid-stat"><span>Paid off</span><strong>{debtProgress}%</strong></div>
+                <div className="account-stats">
+                  <div className="account-stat"><span>Balance</span><strong>{money.format(debt.balance)}</strong></div>
+                  <div className="account-stat"><span>Minimum</span><strong>{money.format(debt.minimum)}</strong></div>
+                  <div className="account-stat"><span>Paid off by</span><strong className="accent-value">{month ? formatMonth(plan.months[month - 1].date) : "—"}</strong></div>
+                </div>
                 <button onClick={() => onEditDebt(debt)} aria-label={`Edit ${debt.name}`}>•••</button>
               </article>
             );
@@ -240,153 +374,251 @@ function SecondaryView({
           {debts.length === 0 && (
             <button className="empty-account-state" onClick={onAddDebt}>
               <strong>Add your first account</strong>
-              <span>No balances are built into this copy of Debt Squasher.</span>
+              <span>Balance, APR, minimum payment, and due day. Nothing else.</span>
             </button>
           )}
         </div>
-        {highestAprDebt && (
-          <div className="debt-insight">
-            <span>💡</span>
-            <div><strong>Your highest APR is {highestAprDebt.name} at {highestAprDebt.apr.toFixed(2)}%.</strong><p>The snowball plan prioritizes the smallest balance for momentum.</p></div>
+
+        {highestApr && (
+          <div className="insight">
+            <span aria-hidden="true">◆</span>
+            <div>
+              <strong>{highestApr.name} carries your highest rate at {highestApr.apr.toFixed(2)}%.</strong>
+              <p>
+                {strategy === "snowball"
+                  ? `You are on the snowball, which targets the smallest balance first. Switching to avalanche would target ${highestApr.name} instead.`
+                  : `You are on the avalanche, so ${highestApr.name} is the current target.`}
+              </p>
+            </div>
+            <button onClick={() => onNavigate("Payoff Plan")}>Compare strategies →</button>
           </div>
         )}
       </section>
     );
   }
 
-  if (active === "Snowball Plan") {
+  if (active === "Payoff Plan") {
+    const other = strategy === "snowball" ? "avalanche" : "snowball";
+    const interestDelta = alternative.totalInterest - plan.totalInterest;
+    const monthDelta = alternative.monthCount - plan.monthCount;
     return (
       <section className="workspace-view">
         <div className="view-toolbar">
-          <div><p className="eyebrow">YOUR PERSONAL ROADMAP</p><h2>The snowball ladder</h2><p>When one card is gone, its payment rolls directly into the next.</p></div>
-          <button className="view-primary coral" onClick={onSimulate}>Tune monthly payment</button>
+          <div>
+            <p className="eyebrow">THE ORDER YOU PAY THINGS OFF</p>
+            <h2>One account at a time</h2>
+            <p>Every account gets its minimum. Everything left over goes to a single target until it is gone — then that payment rolls forward.</p>
+          </div>
+          <button className="btn-primary" onClick={onSimulate}>Change monthly amount</button>
         </div>
+
+        <div className="strategy-switch" role="radiogroup" aria-label="Payoff strategy">
+          {(["snowball", "avalanche"] as Strategy[]).map((option) => (
+            <button
+              key={option}
+              role="radio"
+              aria-checked={strategy === option}
+              className={strategy === option ? "on" : ""}
+              onClick={() => onStrategyChange(option)}
+            >
+              <strong>{STRATEGY_COPY[option].name}</strong>
+              <span>{STRATEGY_COPY[option].rule}</span>
+            </button>
+          ))}
+          {plan.monthCount > 0 && alternative.monthCount > 0 && (
+            <p className="strategy-note">
+              {Math.abs(interestDelta) < 1 && monthDelta === 0
+                ? "With your accounts, both strategies finish at the same time and cost the same interest."
+                : interestDelta > 0
+                  ? `Sticking with ${STRATEGY_COPY[strategy].name.toLowerCase()} costs ${money.format(Math.abs(interestDelta))} less interest than ${other}${monthDelta !== 0 ? ` and finishes ${formatDuration(Math.abs(monthDelta))} ${monthDelta > 0 ? "sooner" : "later"}` : ""}.`
+                  : `Switching to ${other} would save about ${money.format(Math.abs(interestDelta))} in interest${monthDelta !== 0 ? ` and finish ${formatDuration(Math.abs(monthDelta))} ${monthDelta < 0 ? "sooner" : "later"}` : ""}. ${STRATEGY_COPY[strategy].why}`}
+            </p>
+          )}
+        </div>
+
         <div className="plan-layout">
-          <div className="snowball-ladder">
-            {ordered.map((debt, index) => {
-              const targetMonths = ordered.slice(0, index + 1).reduce((sum, item, itemIndex) => (
-                sum + Math.max(1, Math.ceil(item.balance / (item.minimum + (itemIndex === 0 ? extra : 100))))
-              ), 0);
-              return (
-                <article key={debt.id} className={index === 0 ? "current-step" : ""}>
-                  <div className="step-number">{index + 1}</div>
-                  <div className="step-card">
-                    <div><span>{index === 0 ? "CURRENT FOCUS" : `STEP ${index + 1}`}</span><strong>{debt.name}</strong></div>
-                    <div><span>Balance</span><strong>{money.format(debt.balance)}</strong></div>
-                    <div><span>Target</span><strong>{payoffDate(targetMonths)}</strong></div>
-                    <div><span>Payment grows to</span><strong>{money.format(extra + ordered.slice(0, index + 1).reduce((sum, item) => sum + item.minimum, 0))}</strong></div>
-                  </div>
-                </article>
-              );
-            })}
+          <div>
+            <MilestoneTimeline plan={plan} debts={debts} />
+            {debts.length === 0 && (
+              <button className="empty-account-state" onClick={onAddDebt}>
+                <strong>Add an account to build your plan</strong>
+                <span>The payoff order appears here automatically.</span>
+              </button>
+            )}
           </div>
           <aside className="plan-summary">
-            <span className="plan-orbit">◎</span>
             <p>YOUR FINISH LINE</p>
-            <h3>{payoffDate(projection.months)}</h3>
-            <span>About {projection.months} months from now</span>
-            <div><span>Monthly plan</span><strong>{money.format(debts.reduce((sum, debt) => sum + debt.minimum, 0) + extra)}</strong></div>
-            <div><span>Extra snowball</span><strong>{money.format(extra)}</strong></div>
-            <button onClick={onSimulate}>See a faster plan →</button>
+            <h3>{finishLabel(plan)}</h3>
+            <span>{plan.complete ? formatDuration(plan.monthCount) : "Raise the monthly amount to reach a finish"}</span>
+            <div><span>You send each month</span><strong>{money2.format(plan.budget)}</strong></div>
+            <div><span>Required minimums</span><strong>{money2.format(Math.max(0, plan.budget - extra))}</strong></div>
+            <div><span>Extra on top</span><strong>{money2.format(extra)}</strong></div>
+            <div><span>Interest from here</span><strong>{lifetimeLabel(plan, plan.totalInterest)}</strong></div>
+            <div><span>Total you will pay</span><strong>{lifetimeLabel(plan, plan.totalPaid)}</strong></div>
+            <button onClick={onSimulate}>Try paying more →</button>
           </aside>
         </div>
       </section>
     );
   }
 
-  if (active === "Goals") {
-    const goals = [
-      { name: "First update", detail: "You showed up for your plan.", icon: "✓", state: "earned" },
-      { name: "$5K crushed", detail: "First major balance milestone.", icon: "★", state: "earned" },
-      { name: "8-week streak", detail: "Eight consistent weekly wins.", icon: "♨", state: "earned" },
-      { name: "Under $25K", detail: `${money.format(Math.max(0, total - 25000))} to go`, icon: "↘", state: total <= 25000 ? "earned" : "next" },
-      { name: "Halfway free", detail: `${Math.max(0, 50 - progress)}% more to unlock`, icon: "◐", state: progress >= 50 ? "earned" : "locked" },
-      { name: "Final card", detail: "One balance standing.", icon: "1", state: debts.filter((debt) => debt.balance > 0).length <= 1 ? "earned" : "locked" },
-    ];
-    const nextGoalProgress = original > 25000
-      ? Math.min(100, Math.max(0, ((original - total) / (original - 25000)) * 100))
-      : total <= 25000 ? 100 : 0;
+  if (active === "Schedule") {
     return (
       <section className="workspace-view">
-        <div className="goal-hero">
-          <div><p className="eyebrow">MOMENTUM BOARD</p><h2>Small wins become financial freedom.</h2><p>You’ve paid down {money.format(paid)}. That’s real progress—not just a percentage.</p></div>
-          <div className="goal-progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span><strong>{progress}%</strong> complete</span></div>
+        <div className="view-toolbar">
+          <div>
+            <p className="eyebrow">FULL AMORTIZATION</p>
+            <h2>Every payment, month by month</h2>
+            <p>Interest is charged on each balance, then your payments are applied — minimums everywhere, the rest on the current target.</p>
+          </div>
+          <button className="btn-secondary" onClick={onSimulate}>Change monthly amount</button>
         </div>
-        <div className="goals-grid">
-          {goals.map((goal) => (
-            <article key={goal.name} className={goal.state}>
-              <span className="goal-badge">{goal.icon}</span>
-              <div><span>{goal.state === "earned" ? "UNLOCKED" : goal.state === "next" ? "NEXT GOAL" : "LOCKED"}</span><strong>{goal.name}</strong><p>{goal.detail}</p></div>
-            </article>
-          ))}
+
+        <div className="schedule-summary">
+          <article><span>Payments remaining</span><strong>{plan.complete ? plan.monthCount : "—"}</strong><small>{plan.complete ? formatDuration(plan.monthCount) : "cap reached — plan never finishes"}</small></article>
+          <article><span>Debt-free</span><strong className="accent-value">{finishLabel(plan)}</strong><small>at {money2.format(plan.budget)} per month</small></article>
+          <article><span>Interest from here</span><strong>{lifetimeLabel(plan, plan.totalInterest)}</strong><small>{plan.startBalance > 0 ? `${Math.round((plan.totalInterest / plan.startBalance) * 100)}% of what you owe today` : "—"}</small></article>
+          <article><span>Total you will pay</span><strong>{lifetimeLabel(plan, plan.totalPaid)}</strong><small>{money.format(plan.startBalance)} balance + interest</small></article>
         </div>
-        <article className="next-goal">
-          <div><span>Next finish flag</span><strong>Bring total debt under $25,000</strong></div>
-          <div className="goal-bar"><span style={{ width: `${nextGoalProgress}%` }} /></div>
-          <strong>{money.format(Math.max(0, total - 25000))} to go</strong>
-        </article>
+
+        <Schedule plan={plan} debts={debts} />
       </section>
     );
   }
 
-  if (active === "Reports") {
-    const totalMinimum = debts.reduce((sum, debt) => sum + debt.minimum, 0);
+  if (active === "Progress") {
+    const nextStep = milestonesByDate(plan, debts)[0];
     return (
       <section className="workspace-view">
         <div className="view-toolbar">
-          <div><p className="eyebrow">PROGRESS REPORT</p><h2>Your work is changing the curve.</h2><p>Estimates use your balances, APRs, minimums, and current monthly snowball.</p></div>
-          <button className="view-secondary">Last 12 months⌄</button>
+          <div>
+            <p className="eyebrow">PROGRESS</p>
+            <h2>What you have moved so far</h2>
+            <p>Everything here comes from your own balances, rates, and payments — no estimates layered on top.</p>
+          </div>
         </div>
+
+        <div className="progress-hero">
+          <ProgressRing percent={progress} />
+          <div className="progress-hero-copy">
+            <strong>{money.format(paid)} paid down</strong>
+            <p>
+              You started at {money.format(original)} and owe {money.format(total)} today.
+              {nextStep && ` Next up: ${nextStep.debt.name} disappears in ${formatMonth(nextStep.date)}.`}
+            </p>
+          </div>
+          <div className="progress-hero-stats">
+            <div><span>Accounts closed</span><strong>{debts.filter((debt) => debt.balance <= 0).length} of {debts.length}</strong></div>
+            <div><span>Still owing</span><strong>{money.format(total)}</strong></div>
+          </div>
+        </div>
+
         <div className="report-kpis">
-          <article><span>Debt paid down</span><strong>{money.format(paid)}</strong><small>Since your starting balances</small></article>
-          <article><span>Interest avoided</span><strong>{money.format(interestSaved)}</strong><small>With +$150/mo scenario</small></article>
-          <article><span>Time reclaimed</span><strong>{monthsSaved} months</strong><small>With +$150/mo scenario</small></article>
-          <article><span>Monthly commitment</span><strong>{money.format(totalMinimum + extra)}</strong><small>{money.format(extra)} above minimums</small></article>
+          <article>
+            <span>Interest your snowball avoids</span>
+            <strong className="positive">{money.format(vsBaselineInterest)}</strong>
+            <small>Versus paying only minimums and never rolling them forward</small>
+          </article>
+          <article>
+            <span>Time your snowball saves</span>
+            <strong className="positive">{vsBaselineMonths > 0 ? formatDuration(vsBaselineMonths) : "—"}</strong>
+            <small>{baseline.complete ? `Minimums alone would take ${formatDuration(baseline.monthCount)}` : "Minimums alone would never clear the debt"}</small>
+          </article>
+          <article>
+            <span>Interest still ahead of you</span>
+            <strong>{lifetimeLabel(plan, plan.totalInterest)}</strong>
+            <small>On the current plan of {money2.format(plan.budget)} per month</small>
+          </article>
+          <article>
+            <span>Monthly commitment</span>
+            <strong>{money2.format(plan.budget)}</strong>
+            <small>{money.format(extra)} above the required minimums</small>
+          </article>
         </div>
+
         <div className="reports-grid">
-          <article className="report-chart panel">
-            <div className="panel-heading"><div><span className="card-label">PAYOFF FORECAST</span><strong>Balance trajectory</strong></div><div className="legend"><span className="legend-base">Current</span><span className="legend-fast">Faster</span></div></div>
-            <TrajectoryChart base={projection} faster={fasterProjection} />
+          <article className="panel">
+            <div className="panel-heading">
+              <div><span className="card-label">PAYOFF FORECAST</span><strong className="panel-title">Three ways this could go</strong></div>
+            </div>
+            {debts.length > 0 ? (
+              <TrajectoryChart
+                plan={plan}
+                debts={debts}
+                height={340}
+                series={forecastSeries(plan, baseline, faster, simExtra)}
+              />
+            ) : (
+              <p className="panel-note empty-chart">Add an account and the forecast draws itself here.</p>
+            )}
           </article>
-          <article className="distribution panel">
-            <span className="card-label">BALANCE DISTRIBUTION</span>
-            <h3>Where your debt lives</h3>
-            {debts.map((debt) => (
-              <div key={debt.id}>
-                <p><span><i style={{ background: debt.accent }} />{debt.name}</span><strong>{total > 0 ? Math.round((debt.balance / total) * 100) : 0}%</strong></p>
-                <div><span style={{ width: `${total > 0 ? (debt.balance / total) * 100 : 0}%`, background: debt.accent }} /></div>
-              </div>
-            ))}
+          <article className="panel">
+            <span className="card-label">WHERE THE DEBT SITS</span>
+            <h3 className="panel-title">Balance by account</h3>
+            <div className="distribution">
+              {debts.map((debt) => (
+                <div key={debt.id}>
+                  <p>
+                    <span><i style={{ background: debt.accent }} />{debt.name}</span>
+                    <strong>{money.format(debt.balance)} · {total > 0 ? Math.round((debt.balance / total) * 100) : 0}%</strong>
+                  </p>
+                  <div><span style={{ width: `${total > 0 ? (debt.balance / total) * 100 : 0}%`, background: debt.accent }} /></div>
+                </div>
+              ))}
+              {debts.length === 0 && <p className="panel-note">No accounts yet.</p>}
+            </div>
           </article>
         </div>
-        <p className="estimate-note">These projections are motivational planning estimates, not lender statements. Actual interest and payoff timing can vary by issuer and payment date.</p>
+
+        <p className="estimate-note">
+          Projections assume today&apos;s balances, fixed APRs, fixed minimum payments, and on-time payments with no new charges.
+          Card issuers usually recalculate minimums as balances fall and may compound daily, so real statements can differ by a small amount each month.
+        </p>
       </section>
     );
   }
 
   if (active === "Reminders") {
+    const upcoming = [...debts]
+      .map((debt) => ({ debt, due: nextDueDate(debt.dueDay) }))
+      .sort((a, b) => a.due.getTime() - b.due.getTime());
     return (
       <section className="workspace-view">
         <div className="view-toolbar">
-          <div><p className="eyebrow">PAYMENT SAFETY NET</p><h2>Never let a due date surprise you.</h2><p>Choose which reminders matter. They stay attached to this device.</p></div>
-          <span className="reminder-status"><i /> {Object.values(reminders).filter(Boolean).length} reminders active</span>
+          <div>
+            <p className="eyebrow">DUE DATES</p>
+            <h2>What is coming up</h2>
+            <p>Reminder switches are a local preference on this device. Nothing is emailed or texted.</p>
+          </div>
+          <span className="status-pill"><i /> {Object.values(reminders).filter(Boolean).length} on</span>
         </div>
         <div className="reminders-layout">
           <div className="reminder-list">
-            {debts.map((debt) => (
-              <article key={debt.id}>
-                <span className="account-mark" style={{ background: debt.accent }}>{debt.mark}</span>
-                <div><strong>{debt.name}</strong><span>Due Aug {debt.dueDay} · {money.format(debt.minimum)} minimum</span></div>
+            {upcoming.map(({ debt, due }) => (
+              <article key={debt.id} style={{ "--accent": debt.accent } as React.CSSProperties}>
+                <span className="account-mark">{debt.mark}</span>
+                <div>
+                  <strong>{debt.name}</strong>
+                  <span>{dayMonth.format(due)} · {dueLabel(due)} · {money2.format(debt.minimum)} minimum</span>
+                </div>
                 <div className="reminder-chips"><span>7 days before</span><span>2 days before</span></div>
-                <button className={`toggle ${reminders[debt.id] ? "on" : ""}`} onClick={() => setReminders({ ...reminders, [debt.id]: !reminders[debt.id] })} aria-pressed={reminders[debt.id]} aria-label={`${reminders[debt.id] ? "Disable" : "Enable"} ${debt.name} reminder`}><span /></button>
+                <button
+                  className={`toggle ${reminders[debt.id] ? "on" : ""}`}
+                  onClick={() => setReminders({ ...reminders, [debt.id]: !reminders[debt.id] })}
+                  aria-pressed={Boolean(reminders[debt.id])}
+                  aria-label={`${reminders[debt.id] ? "Disable" : "Enable"} ${debt.name} reminder`}
+                ><span /></button>
               </article>
             ))}
+            {debts.length === 0 && <p className="panel-note">Add an account to see its due date here.</p>}
           </div>
-          <aside className="reminder-tip">
-            <span>♧</span>
-            <h3>One calm check-in</h3>
-            <p>We recommend a monthly balance update two days after your last statement closes. That keeps reports useful without becoming another daily chore.</p>
-            <button onClick={onUpdate}>Schedule monthly check-in</button>
+          <aside className="side-note">
+            <h3>One check-in a month</h3>
+            <p>
+              Update balances two days after your last statement closes. That is late enough for the numbers to be final
+              and early enough to plan the month — and it keeps this from becoming a daily chore.
+            </p>
+            <button onClick={onUpdate}>Update balances now</button>
           </aside>
         </div>
       </section>
@@ -395,21 +627,93 @@ function SecondaryView({
 
   return (
     <section className="workspace-view">
-        <div className="view-toolbar">
-          <div><p className="eyebrow">SETTINGS & PRIVACY</p><h2>Simple, private, and under your control.</h2><p>{sharedMode ? "Shared only with signed-in users on this private-network server." : "No bank login. No card number. No financial data leaves this browser."}</p></div>
+      <div className="view-toolbar">
+        <div>
+          <p className="eyebrow">SETTINGS</p>
+          <h2>How this app behaves</h2>
+          <p>{sharedMode
+            ? "Shared with signed-in users on this private-network server."
+            : "No bank login, no card numbers. Nothing leaves this browser."}</p>
         </div>
-        <div className="settings-grid">
-        <article><span className="setting-icon blue-bg">⌂</span><div><strong>{sharedMode ? "Private-network data" : "Local-only data"}</strong><p>{sharedMode ? "Authorized users share one plan stored by the local executable." : "Your balances and plan are stored in this browser’s local storage."}</p></div><span className="setting-value">On</span></article>
-        <article><span className="setting-icon mint-bg">◎</span><div><strong>Strategy</strong><p>Smallest balance first for frequent motivational wins.</p></div><button>Snowball⌄</button></article>
-        <article><span className="setting-icon coral-bg">$</span><div><strong>Monthly snowball</strong><p>The extra amount paid above all required minimums.</p></div><strong className="setting-value">{money.format(extra)}</strong></article>
-        <article><span className="setting-icon yellow-bg">♧</span><div><strong>Reminder timing</strong><p>Two gentle alerts before each payment is due.</p></div><button>Manage</button></article>
+      </div>
+      <div className="settings-grid">
+        <article>
+          <div><strong>{sharedMode ? "Private-network storage" : "Local-only storage"}</strong><p>{sharedMode ? "Authorized users share one plan held by the local executable." : "Balances live in this browser's local storage under debt-snowball-state."}</p></div>
+          <span className="setting-value">On</span>
+        </article>
+        <article>
+          <div><strong>Payoff strategy</strong><p>{STRATEGY_COPY[strategy].rule}. {STRATEGY_COPY[strategy].why}</p></div>
+          <div className="strategy-switch inline">
+            {(["snowball", "avalanche"] as Strategy[]).map((option) => (
+              <button key={option} className={strategy === option ? "on" : ""} onClick={() => onStrategyChange(option)}>
+                <strong>{STRATEGY_COPY[option].name}</strong>
+              </button>
+            ))}
+          </div>
+        </article>
+        <article>
+          <div><strong>Extra each month</strong><p>Paid on top of every required minimum. This is the number that moves your finish date.</p></div>
+          <button onClick={onSimulate}>{money2.format(extra)}</button>
+        </article>
+        <article>
+          <div><strong>Rounding</strong><p>Interest is calculated monthly as APR ÷ 12 on the balance carried into the month, rounded to the cent.</p></div>
+          <span className="setting-value">Monthly</span>
+        </article>
       </div>
       <article className="privacy-panel">
-        <div><span>🔒</span><div><strong>Why we’re starting without bank syncing</strong><p>Manual updates reduce complexity and avoid storing banking credentials. A guided 30-second monthly check-in gives this app enough information to keep your plan useful and motivating.</p></div></div>
-        <button onClick={onUpdate}>Update my numbers</button>
+        <div>
+          <strong>Why there is no bank sync</strong>
+          <p>
+            Manual updates avoid storing bank credentials entirely. A 30-second monthly check-in gives the forecast
+            everything it needs, and the trade is that balances are only as current as your last update.
+          </p>
+        </div>
+        <button onClick={onUpdate}>Update balances</button>
       </article>
     </section>
   );
+}
+
+function ordinal(day: number) {
+  if (day % 100 >= 11 && day % 100 <= 13) return "th";
+  return ["th", "st", "nd", "rd"][day % 10] ?? "th";
+}
+
+/** The three lines every forecast chart shows, with their finish dates. */
+function forecastSeries(plan: Plan, baseline: Plan, faster: Plan, simExtra: number): Series[] {
+  const note = (item: Plan) => {
+    const date = payoffDate(item);
+    if (!date) return item.complete ? "Nothing left to pay" : "Never finishes at this amount";
+    return `Debt-free ${formatMonth(date)} · ${formatDuration(item.monthCount)}`;
+  };
+  const series: Series[] = [];
+
+  if (baseline.monthCount > 0) {
+    series.push({
+      key: "baseline",
+      label: "Minimums only",
+      variant: "minimums",
+      points: balanceSeries(baseline),
+      note: baseline.complete ? note(baseline) : "Never finishes on minimums alone",
+    });
+  }
+  series.push({
+    key: "plan",
+    label: "Your plan",
+    variant: "plan",
+    points: balanceSeries(plan),
+    note: note(plan),
+  });
+  if (simExtra > 0) {
+    series.push({
+      key: "faster",
+      label: `Plus ${money.format(simExtra)}/mo`,
+      variant: "faster",
+      points: balanceSeries(faster),
+      note: note(faster),
+    });
+  }
+  return series;
 }
 
 type HomeProps = {
@@ -430,6 +734,8 @@ type DebtDraft = {
   mark: string;
 };
 
+const ACCENTS = ["#3f6d63", "#5b7fa6", "#a2704f", "#7a6b95", "#b0834a", "#6d8f5c"];
+
 const EMPTY_DEBT_DRAFT: DebtDraft = {
   name: "",
   balance: "",
@@ -437,31 +743,44 @@ const EMPTY_DEBT_DRAFT: DebtDraft = {
   apr: "",
   minimum: "",
   dueDay: "1",
-  accent: "#315BE8",
+  accent: ACCENTS[0],
   mark: "◆",
 };
+
+const NAV: [string, string][] = [
+  ["Overview", "⌂"],
+  ["Accounts", "▤"],
+  ["Payoff Plan", "↗"],
+  ["Schedule", "▦"],
+  ["Progress", "◔"],
+  ["Reminders", "◷"],
+  ["Settings", "⚙"],
+];
 
 export default function Home({
   sharedState,
   onSharedStateChange,
   headerControls,
-  userDisplayName = "Maya",
+  userDisplayName = "there",
 }: HomeProps = {}) {
-  const [debts, setDebts] = useState<Debt[]>(sharedState?.debts ?? DEFAULT_DEBTS);
+  const [debts, setDebts] = useState<Debt[]>(sharedState?.debts ?? []);
   const [extra, setExtra] = useState(sharedState?.extra ?? 0);
-  const [simExtra, setSimExtra] = useState(150);
+  const [strategy, setStrategy] = useState<Strategy>(sharedState?.strategy ?? "snowball");
+  const [simExtra, setSimExtra] = useState(100);
   const [active, setActive] = useState("Overview");
   const [modal, setModal] = useState<"update" | "simulator" | "debt" | null>(null);
   const [draftBalances, setDraftBalances] = useState<Record<number, string>>({});
   const [editingDebtId, setEditingDebtId] = useState<number | null>(null);
   const [debtDraft, setDebtDraft] = useState<DebtDraft>(EMPTY_DEBT_DRAFT);
   const [toast, setToast] = useState("");
+  const now = useClientNow();
 
   useEffect(() => {
     if (sharedState) {
       const sharedTimer = window.setTimeout(() => {
         setDebts(sharedState.debts);
         setExtra(sharedState.extra);
+        setStrategy(sharedState.strategy ?? "snowball");
       }, 0);
       return () => window.clearTimeout(sharedTimer);
     }
@@ -473,6 +792,7 @@ export default function Home({
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed.debts)) setDebts(parsed.debts);
           if (typeof parsed.extra === "number") setExtra(parsed.extra);
+          if (parsed.strategy === "avalanche" || parsed.strategy === "snowball") setStrategy(parsed.strategy);
         }
       } catch {
         // A clean default state is safer than blocking the dashboard.
@@ -483,16 +803,23 @@ export default function Home({
 
   const total = debts.reduce((sum, debt) => sum + debt.balance, 0);
   const original = debts.reduce((sum, debt) => sum + debt.original, 0);
-  const paid = original - total;
-  const progress = original > 0
-    ? Math.max(0, Math.min(100, Math.round((paid / original) * 100)))
-    : 0;
-  const minimums = debts.reduce((sum, debt) => sum + debt.minimum, 0);
-  const baseProjection = useMemo(() => simulate(debts, extra), [debts, extra]);
-  const fasterProjection = useMemo(() => simulate(debts, extra + simExtra), [debts, extra, simExtra]);
-  const monthsSaved = Math.max(0, baseProjection.months - fasterProjection.months);
-  const interestSaved = Math.max(0, baseProjection.interest - fasterProjection.interest);
-  const focusDebt = [...debts].filter((debt) => debt.balance > 0).sort((a, b) => a.balance - b.balance)[0];
+  const paid = Math.max(0, original - total);
+  const progress = original > 0 ? Math.max(0, Math.min(100, Math.round((paid / original) * 100))) : 0;
+
+  const plan = useMemo(() => buildPlan(debts, extra, strategy), [debts, extra, strategy]);
+  const baseline = useMemo(() => buildPlan(debts, 0, strategy, { roll: false }), [debts, strategy]);
+  const faster = useMemo(() => buildPlan(debts, extra + simExtra, strategy), [debts, extra, simExtra, strategy]);
+  const alternative = useMemo(
+    () => buildPlan(debts, extra, strategy === "snowball" ? "avalanche" : "snowball"),
+    [debts, extra, strategy],
+  );
+
+  const monthsSaved = Math.max(0, plan.monthCount - faster.monthCount);
+  const interestSaved = Math.max(0, plan.totalInterest - faster.totalInterest);
+  const dueSoon = debts.filter((debt) => {
+    const due = nextDueDate(debt.dueDay);
+    return (due.getTime() - Date.now()) / 86400000 <= 7;
+  }).length;
 
   function openUpdate() {
     if (debts.length === 0) {
@@ -514,14 +841,19 @@ export default function Home({
       dueDay: debt.dueDay.toString(),
       accent: debt.accent,
       mark: debt.mark,
-    } : EMPTY_DEBT_DRAFT);
+    } : { ...EMPTY_DEBT_DRAFT, accent: ACCENTS[debts.length % ACCENTS.length] });
     setModal("debt");
+  }
+
+  function flash(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 3200);
   }
 
   function saveDebt() {
     const name = debtDraft.name.trim();
     const balance = Math.max(0, Number(debtDraft.balance) || 0);
-    const original = Math.max(0.01, Number(debtDraft.original) || balance || 0.01);
+    const originalBalance = Math.max(0.01, Number(debtDraft.original) || balance || 0.01);
     const apr = Math.max(0, Number(debtDraft.apr) || 0);
     const minimum = Math.max(0, Number(debtDraft.minimum) || 0);
     const dueDay = Math.max(1, Math.min(31, Math.trunc(Number(debtDraft.dueDay) || 1)));
@@ -531,7 +863,7 @@ export default function Home({
       id: editingDebtId ?? Math.max(0, ...debts.map((debt) => debt.id)) + 1,
       name,
       balance,
-      original,
+      original: originalBalance,
       apr,
       minimum,
       dueDay,
@@ -540,12 +872,11 @@ export default function Home({
     };
     const updated = editingDebtId === null
       ? [...debts, nextDebt]
-      : debts.map((debt) => debt.id === editingDebtId ? nextDebt : debt);
+      : debts.map((debt) => (debt.id === editingDebtId ? nextDebt : debt));
     setDebts(updated);
-    persistState(updated, extra);
+    persistState(updated, extra, strategy);
     setModal(null);
-    setToast(editingDebtId === null ? "Account added to your plan." : `${name} updated.`);
-    window.setTimeout(() => setToast(""), 3200);
+    flash(editingDebtId === null ? `${name} added to your plan.` : `${name} updated.`);
   }
 
   function deleteDebt() {
@@ -554,10 +885,9 @@ export default function Home({
     if (!debt || !window.confirm(`Remove ${debt.name} from the plan?`)) return;
     const updated = debts.filter((item) => item.id !== editingDebtId);
     setDebts(updated);
-    persistState(updated, extra);
+    persistState(updated, extra, strategy);
     setModal(null);
-    setToast(`${debt.name} removed.`);
-    window.setTimeout(() => setToast(""), 3200);
+    flash(`${debt.name} removed.`);
   }
 
   function saveBalances() {
@@ -566,19 +896,25 @@ export default function Home({
       balance: Math.max(0, Number(draftBalances[debt.id]) || 0),
     }));
     setDebts(updated);
-    persistState(updated, extra);
+    persistState(updated, extra, strategy);
     setModal(null);
-    setToast("Balances updated — your new forecast is ready.");
-    window.setTimeout(() => setToast(""), 3200);
+    flash("Balances updated — the forecast has been recalculated.");
   }
 
   function saveExtra(value: number) {
-    setExtra(value);
-    persistState(debts, value);
+    const next = Math.max(0, value);
+    setExtra(next);
+    persistState(debts, next, strategy);
   }
 
-  function persistState(nextDebts: Debt[], nextExtra: number) {
-    const nextState = { debts: nextDebts, extra: nextExtra };
+  function changeStrategy(next: Strategy) {
+    setStrategy(next);
+    persistState(debts, extra, next);
+    flash(`Now paying ${STRATEGY_COPY[next].rule.toLowerCase()}.`);
+  }
+
+  function persistState(nextDebts: Debt[], nextExtra: number, nextStrategy: Strategy) {
+    const nextState: DebtState = { debts: nextDebts, extra: nextExtra, strategy: nextStrategy };
     if (onSharedStateChange) {
       onSharedStateChange(nextState);
       return;
@@ -586,15 +922,9 @@ export default function Home({
     localStorage.setItem("debt-snowball-state", JSON.stringify(nextState));
   }
 
-  const nav = [
-    ["Overview", "⌂"],
-    ["My Debts", "▣"],
-    ["Snowball Plan", "↗"],
-    ["Goals", "◎"],
-    ["Reports", "▥"],
-    ["Reminders", "♧"],
-    ["Settings", "⚙"],
-  ];
+  const headline = active === "Overview"
+    ? `${now ? greeting(now) : "Hello"}, ${userDisplayName}`
+    : active;
 
   return (
     <main className="app-shell">
@@ -604,100 +934,151 @@ export default function Home({
           <span>Debt<br />Snowball</span>
         </button>
         <nav aria-label="Main navigation">
-          {nav.map(([label, glyph]) => (
-            <button key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)}>
+          {NAV.map(([label, glyph]) => (
+            <button key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)} aria-current={active === label ? "page" : undefined}>
               <Icon>{glyph}</Icon><span>{label}</span>
             </button>
           ))}
         </nav>
-        <div className="streak-card">
-          <span className="streak-flame">♨</span>
-          <div><strong>8 week streak</strong><small>On-time and on track</small></div>
+        <div className="sidebar-status">
+          <span>Debt-free</span>
+          <strong>{debts.length > 0 ? finishLabel(plan) : "—"}</strong>
+          <small>{plan.complete && plan.monthCount > 0 ? `${formatDuration(plan.monthCount)} to go` : "Add your accounts to see this"}</small>
         </div>
-        <p className="privacy-note"><span>✓</span> Stored privately on this device</p>
+        <p className="privacy-note"><span aria-hidden="true">✓</span> Stored privately on this device</p>
       </aside>
 
       <section className="main-area">
         <header className="topbar">
           <div>
-            <p className="eyebrow">MONDAY, JULY 28</p>
-            <h1>{active === "Overview" ? `Good morning, ${userDisplayName}!` : active}</h1>
-            <p className="subtitle">{active === "Overview" ? "Every payment brings freedom closer." : "Your plan, clearly organized and easy to update."}</p>
+            <p className="eyebrow">{now ? now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase() : ""}</p>
+            <h1>{headline}</h1>
+            <p className="subtitle">
+              {active === "Overview"
+                ? debts.length > 0
+                  ? `${money.format(total)} left across ${debts.length} ${debts.length === 1 ? "account" : "accounts"}.`
+                  : "Add your first account to build a payoff plan."
+                : "Your plan, in detail."}
+            </p>
           </div>
           <div className="header-actions">
             {headerControls}
-            <button className="update-button" onClick={openUpdate}><span>↻</span> Update balances</button>
-            <button className="notification-button" aria-label="Notifications"><span>♧</span><b>3</b></button>
-            <button className="avatar" aria-label="Profile menu">M</button>
+            <button className="btn-primary" onClick={openUpdate}>Update balances</button>
+            {dueSoon > 0 && (
+              <button className="due-chip" onClick={() => setActive("Reminders")}>
+                <b>{dueSoon}</b> due within 7 days
+              </button>
+            )}
           </div>
         </header>
 
         {active === "Overview" ? (
           <>
+            <PlanWarnings plan={plan} onFix={() => setModal("simulator")} />
+
             <section className="hero-grid">
-              <article className="panel total-card">
-                <p className="card-label">TOTAL DEBT</p>
-                <div className="total-content">
+              <article className="panel standing-card">
+                <p className="card-label">WHAT YOU OWE TODAY</p>
+                <div className="standing-top">
                   <div>
                     <strong className="total-number">{money.format(total)}</strong>
-                    <span className="down-pill">↓ {money.format(1840)} this year</span>
+                    {paid > 0 && <span className="paid-pill">{money.format(paid)} paid down so far</span>}
                   </div>
-                  <div className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}>
-                    <div><strong>{progress}%</strong><span>paid off</span></div>
+                  <ProgressRing percent={progress} />
+                </div>
+                <dl className="standing-facts">
+                  <div>
+                    <dt>Debt-free</dt>
+                    <dd className="accent-value">{debts.length > 0 ? finishLabel(plan) : "—"}</dd>
                   </div>
-                </div>
-                <div className="next-payment">
-                  <div><span>Next payment</span><strong>{focusDebt?.name ?? "Add your first account"}</strong></div>
-                  <div><span>{focusDebt ? dueLabel(focusDebt.dueDay) : "No plan yet"}</span><strong>{focusDebt ? money.format(focusDebt.minimum + extra) : money.format(0)}</strong></div>
-                </div>
+                  <div>
+                    <dt>Interest still ahead</dt>
+                    <dd>{lifetimeLabel(plan, plan.totalInterest)}</dd>
+                  </div>
+                  <div>
+                    <dt>You pay each month</dt>
+                    <dd>{money2.format(plan.budget)}</dd>
+                  </div>
+                </dl>
               </article>
 
-              <article className="panel trajectory-card">
-                <div className="panel-heading">
-                  <div><span className="card-label">YOUR DEBT TRAJECTORY</span><strong>See the finish line</strong></div>
-                  <div className="legend"><span className="legend-base">Current plan</span><span className="legend-fast">+{money.format(simExtra)}/mo</span></div>
-                </div>
-                <TrajectoryChart base={baseProjection} faster={fasterProjection} />
-              </article>
+              <ThisMonthPanel plan={plan} debts={debts} onOpenSchedule={() => setActive("Schedule")} />
 
-              <article className="simulator-card">
-                <span className="sparkle one">✦</span><span className="sparkle two">✦</span>
-                <p>What if you paid</p>
-                <h2>{money.format(simExtra)} more?</h2>
-                <div className="sim-result"><span>Debt-free</span><strong>{monthsSaved} months sooner</strong></div>
-                <div className="sim-result"><span>Interest saved</span><strong>{money.format(interestSaved)}</strong></div>
-                <button onClick={() => setModal("simulator")}>Try simulator <span>→</span></button>
+              <article className="panel whatif-card">
+                <p className="card-label">WHAT IF</p>
+                <h3 className="panel-title">You added {money.format(simExtra)} a month?</h3>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  step="25"
+                  value={simExtra}
+                  onChange={(event) => setSimExtra(Number(event.target.value))}
+                  aria-label="Extra monthly payment to test"
+                />
+                <dl className="whatif-results">
+                  <div><dt>Finish</dt><dd>{monthsSaved > 0 ? `${formatDuration(monthsSaved)} sooner` : "No change yet"}</dd></div>
+                  <div><dt>Interest saved</dt><dd className="positive">{money.format(interestSaved)}</dd></div>
+                  <div><dt>New debt-free date</dt><dd>{finishLabel(faster)}</dd></div>
+                </dl>
+                <button className="btn-primary wide" onClick={() => setModal("simulator")} disabled={debts.length === 0}>
+                  Add it to my plan
+                </button>
               </article>
+            </section>
+
+            <section className="panel chart-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="card-label">BALANCE OVER TIME</span>
+                  <strong className="panel-title">How the debt actually shrinks</strong>
+                  <p className="panel-note">Each numbered marker is the month an account disappears and its payment rolls into the next one.</p>
+                </div>
+              </div>
+              {debts.length > 0 ? (
+                <TrajectoryChart
+                  plan={plan}
+                  debts={debts}
+                  series={forecastSeries(plan, baseline, faster, simExtra)}
+                />
+              ) : (
+                <p className="panel-note empty-chart">Add an account and the forecast draws itself here.</p>
+              )}
             </section>
 
             <section className="debt-section">
               <div className="section-heading">
-                <div><p className="eyebrow">YOUR ACCOUNTS</p><h2>Every balance has a finish line.</h2></div>
-                <button onClick={() => setActive("My Debts")}>See all details →</button>
+                <div>
+                  <p className="eyebrow">YOUR ACCOUNTS</p>
+                  <h2>Every balance has a finish date</h2>
+                </div>
+                <button className="btn-quiet" onClick={() => setActive("Accounts")}>See all details →</button>
               </div>
               <div className="debts-grid">
-                {debts.map((debt) => <DebtCard key={debt.id} debt={debt} focused={debt.id === focusDebt?.id} onEdit={openDebtEditor} />)}
-                {debts.length === 0 ? (
-                  <button className="empty-debts-card" onClick={() => openDebtEditor()}>
-                    <span>+</span>
-                    <strong>Add your first debt</strong>
-                    <small>Enter a balance, APR, minimum, and due date.</small>
-                  </button>
-                ) : (
-                  <article className="milestone-card">
-                    <div className="medal"><span>★</span></div>
-                    <div><p>Milestone unlocked</p><strong>{money.format(Math.max(0, Math.floor(paid / 5000) * 5000))} crushed</strong><span>You’ve already done the hard part: starting.</span></div>
-                  </article>
-                )}
+                {debts.map((debt) => (
+                  <DebtCard
+                    key={debt.id}
+                    debt={debt}
+                    plan={plan}
+                    focused={debt.id === plan.order[0]}
+                    onEdit={openDebtEditor}
+                  />
+                ))}
+                <button className="empty-debts-card" onClick={() => openDebtEditor()}>
+                  <span aria-hidden="true">+</span>
+                  <strong>{debts.length === 0 ? "Add your first account" : "Add another account"}</strong>
+                  <small>Balance, APR, minimum, due day.</small>
+                </button>
               </div>
             </section>
 
             <section className="bottom-strip">
-              <div><span>Total monthly plan</span><strong>{money.format(minimums + extra)}</strong></div>
-              <div><span>Extra snowball</span><strong className="green">{money.format(extra)}</strong></div>
-              <div><span>Est. interest saved</span><strong className="green">{money.format(interestSaved)}</strong></div>
-              <div><span>Est. debt-free</span><strong className="blue">{payoffDate(baseProjection.months)}</strong></div>
-              <button onClick={() => setActive("Goals")}><span>☆</span><div><strong>You’re on track!</strong><small>Keep that momentum going.</small></div><b>→</b></button>
+              <div><span>Required minimums</span><strong>{money2.format(Math.max(0, plan.budget - extra))}</strong></div>
+              <div><span>Extra you add</span><strong className="positive">{money2.format(extra)}</strong></div>
+              <div><span>Total monthly</span><strong>{money2.format(plan.budget)}</strong></div>
+              <div><span>Total interest ahead</span><strong>{lifetimeLabel(plan, plan.totalInterest)}</strong></div>
+              <div><span>Payments left</span><strong className="accent-value">{plan.complete ? plan.monthCount : "—"}</strong></div>
             </section>
           </>
         ) : (
@@ -705,16 +1086,22 @@ export default function Home({
             active={active}
             debts={debts}
             extra={extra}
+            strategy={strategy}
             total={total}
             original={original}
             paid={paid}
             progress={progress}
-            projection={baseProjection}
-            fasterProjection={fasterProjection}
+            plan={plan}
+            baseline={baseline}
+            faster={faster}
+            alternative={alternative}
+            simExtra={simExtra}
             onUpdate={openUpdate}
             onSimulate={() => setModal("simulator")}
             onAddDebt={() => openDebtEditor()}
             onEditDebt={openDebtEditor}
+            onStrategyChange={changeStrategy}
+            onNavigate={setActive}
             sharedMode={Boolean(onSharedStateChange)}
           />
         )}
@@ -728,31 +1115,58 @@ export default function Home({
               <>
                 <p className="eyebrow">MONTHLY CHECK-IN</p>
                 <h2 id="modal-title">Update your balances</h2>
-                <p className="modal-intro">About 30 seconds. Enter the latest statement balance for each card and we’ll refresh every forecast.</p>
+                <p className="modal-intro">Enter the latest statement balance for each account. Everything else recalculates from these numbers.</p>
                 <div className="balance-inputs">
                   {debts.map((debt) => (
                     <label key={debt.id}>
                       <span><i style={{ background: debt.accent }}>{debt.mark}</i>{debt.name}</span>
-                      <span className="currency-input"><b>$</b><input inputMode="decimal" value={draftBalances[debt.id] ?? ""} onChange={(event) => setDraftBalances({ ...draftBalances, [debt.id]: event.target.value })} aria-label={`${debt.name} balance`} /></span>
+                      <span className="currency-input">
+                        <b>$</b>
+                        <input
+                          inputMode="decimal"
+                          value={draftBalances[debt.id] ?? ""}
+                          onChange={(event) => setDraftBalances({ ...draftBalances, [debt.id]: event.target.value })}
+                          aria-label={`${debt.name} balance`}
+                        />
+                      </span>
                     </label>
                   ))}
                 </div>
-                <button className="modal-primary" onClick={saveBalances}>Save & refresh my plan</button>
-                <p className="local-note">🔒 {onSharedStateChange ? "Saved to your private-network server." : "Your numbers stay in this browser."} No bank connection needed.</p>
+                <button className="modal-primary" onClick={saveBalances}>Save and recalculate</button>
+                <p className="local-note">{onSharedStateChange ? "Saved to your private-network server." : "Your numbers stay in this browser."} No bank connection is used.</p>
               </>
             ) : modal === "debt" ? (
               <>
                 <p className="eyebrow">{editingDebtId === null ? "NEW ACCOUNT" : "ACCOUNT DETAILS"}</p>
-                <h2 id="modal-title">{editingDebtId === null ? "Add a debt" : "Edit this debt"}</h2>
-                <p className="modal-intro">These values drive the payoff forecast. Card numbers and bank credentials are never requested.</p>
+                <h2 id="modal-title">{editingDebtId === null ? "Add an account" : "Edit this account"}</h2>
+                <p className="modal-intro">These four numbers drive the whole forecast. Card numbers and bank logins are never requested.</p>
                 <div className="debt-editor-grid">
-                  <label className="wide-field">Account name<input autoFocus value={debtDraft.name} maxLength={80} onChange={(event) => setDebtDraft({ ...debtDraft, name: event.target.value })} placeholder="Card or lender name" /></label>
-                  <label>Current balance<input type="number" inputMode="decimal" min="0" step="0.01" value={debtDraft.balance} onChange={(event) => setDebtDraft({ ...debtDraft, balance: event.target.value })} /></label>
-                  <label>Starting balance<input type="number" inputMode="decimal" min="0.01" step="0.01" value={debtDraft.original} onChange={(event) => setDebtDraft({ ...debtDraft, original: event.target.value })} /></label>
-                  <label>APR %<input type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={debtDraft.apr} onChange={(event) => setDebtDraft({ ...debtDraft, apr: event.target.value })} /></label>
-                  <label>Minimum payment<input type="number" inputMode="decimal" min="0" step="0.01" value={debtDraft.minimum} onChange={(event) => setDebtDraft({ ...debtDraft, minimum: event.target.value })} /></label>
-                  <label>Due day<input type="number" inputMode="numeric" min="1" max="31" step="1" value={debtDraft.dueDay} onChange={(event) => setDebtDraft({ ...debtDraft, dueDay: event.target.value })} /></label>
-                  <label>Card color<input type="color" value={debtDraft.accent} onChange={(event) => setDebtDraft({ ...debtDraft, accent: event.target.value })} /></label>
+                  <label className="wide-field">Account name
+                    <input autoFocus value={debtDraft.name} maxLength={80} onChange={(event) => setDebtDraft({ ...debtDraft, name: event.target.value })} placeholder="Card or lender name" />
+                  </label>
+                  <label>Current balance
+                    <input type="number" inputMode="decimal" min="0" step="0.01" value={debtDraft.balance} onChange={(event) => setDebtDraft({ ...debtDraft, balance: event.target.value })} />
+                    <small>What you owe right now.</small>
+                  </label>
+                  <label>Starting balance
+                    <input type="number" inputMode="decimal" min="0.01" step="0.01" value={debtDraft.original} onChange={(event) => setDebtDraft({ ...debtDraft, original: event.target.value })} />
+                    <small>Used only for the &ldquo;paid off&rdquo; percentage.</small>
+                  </label>
+                  <label>APR %
+                    <input type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={debtDraft.apr} onChange={(event) => setDebtDraft({ ...debtDraft, apr: event.target.value })} />
+                    <small>The purchase rate from your statement.</small>
+                  </label>
+                  <label>Minimum payment
+                    <input type="number" inputMode="decimal" min="0" step="0.01" value={debtDraft.minimum} onChange={(event) => setDebtDraft({ ...debtDraft, minimum: event.target.value })} />
+                    <small>Held fixed for the whole forecast.</small>
+                  </label>
+                  <label>Due day
+                    <input type="number" inputMode="numeric" min="1" max="31" step="1" value={debtDraft.dueDay} onChange={(event) => setDebtDraft({ ...debtDraft, dueDay: event.target.value })} />
+                    <small>Day of the month.</small>
+                  </label>
+                  <label>Colour
+                    <input type="color" value={debtDraft.accent} onChange={(event) => setDebtDraft({ ...debtDraft, accent: event.target.value })} />
+                  </label>
                 </div>
                 <button className="modal-primary" onClick={saveDebt} disabled={!debtDraft.name.trim()}>Save account</button>
                 {editingDebtId !== null && <button className="modal-danger" onClick={deleteDebt}>Remove this account</button>}
@@ -760,23 +1174,40 @@ export default function Home({
             ) : (
               <>
                 <p className="eyebrow">PAYOFF SIMULATOR</p>
-                <h2 id="modal-title">Turn “what if” into a date.</h2>
-                <p className="modal-intro">Move the slider to see how a little more each month can change your finish line.</p>
-                <div className="slider-value">{money.format(simExtra)}<span> extra / month</span></div>
+                <h2 id="modal-title">Turn &ldquo;what if&rdquo; into a date</h2>
+                <p className="modal-intro">Your minimums total {money2.format(Math.max(0, plan.budget - extra))} a month. Anything above that goes straight at the target account.</p>
+                <div className="slider-value">{money.format(simExtra)}<span> extra per month</span></div>
                 <input className="range" type="range" min="0" max="1000" step="25" value={simExtra} onChange={(event) => setSimExtra(Number(event.target.value))} aria-label="Extra monthly payment" />
                 <div className="sim-grid">
-                  <div><span>Debt-free</span><strong>{payoffDate(fasterProjection.months)}</strong><small>{monthsSaved} months sooner</small></div>
-                  <div><span>Interest saved</span><strong>{money.format(interestSaved)}</strong><small>Approximate projection</small></div>
+                  <div><span>Debt-free</span><strong>{finishLabel(faster)}</strong><small>{monthsSaved > 0 ? `${formatDuration(monthsSaved)} sooner than now` : "same as your current plan"}</small></div>
+                  <div><span>Interest saved</span><strong>{money.format(interestSaved)}</strong><small>compared with {lifetimeLabel(plan, plan.totalInterest)} today</small></div>
+                  <div><span>New monthly total</span><strong>{money2.format(plan.budget + simExtra)}</strong><small>including all minimums</small></div>
+                  <div><span>Total you would pay</span><strong>{lifetimeLabel(faster, faster.totalPaid)}</strong><small>instead of {lifetimeLabel(plan, plan.totalPaid)}</small></div>
                 </div>
-                <button className="modal-primary" onClick={() => { saveExtra(extra + simExtra); setModal(null); setToast(`${money.format(simExtra)} added to your monthly snowball.`); window.setTimeout(() => setToast(""), 3200); }}>Add this to my plan</button>
-                <p className="local-note">Projections are estimates and may differ from card issuer calculations.</p>
+                <button
+                  className="modal-primary"
+                  onClick={() => {
+                    saveExtra(extra + simExtra);
+                    setModal(null);
+                    flash(`${money.format(simExtra)} added to your monthly total.`);
+                  }}
+                  disabled={simExtra <= 0 || debts.length === 0}
+                >
+                  Add {money.format(simExtra)} to my plan
+                </button>
+                {extra > 0 && (
+                  <button className="modal-secondary" onClick={() => { saveExtra(0); setModal(null); flash("Extra payment cleared."); }}>
+                    Clear my current {money2.format(extra)} extra
+                  </button>
+                )}
+                <p className="local-note">Estimates use fixed minimums and monthly compounding, so issuer statements can differ slightly.</p>
               </>
             )}
           </section>
         </div>
       )}
 
-      {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      {toast && <div className="toast" role="status"><span aria-hidden="true">✓</span>{toast}</div>}
     </main>
   );
 }

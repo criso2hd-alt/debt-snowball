@@ -38,6 +38,7 @@ yarn-error.log*
 next-env.d.ts
 *.tsbuildinfo
 /dist/
+/.vinext/
 /.wrangler/
 /.sites-runtime/
 /outputs/
@@ -55,3 +56,6 @@ DebtSquasherData.dat.tmp
 # operating systems
 Thumbs.db
 Desktop.ini
+
+# Compiled engine used by the calculation tests
+dist-test/
