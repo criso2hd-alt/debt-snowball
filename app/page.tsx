@@ -15,8 +15,11 @@ import {
   milestones,
   milestonesByDate,
   monthActions,
+  ownerBreakdown,
+  ownerNames,
   nextDueDate,
   payoffDate,
+  UNASSIGNED_OWNER,
 } from "./lib/plan";
 
 export type { Debt } from "./lib/plan";
@@ -234,7 +237,7 @@ function DebtCard({ debt, plan, focused, onEdit }: { debt: Debt; plan: Plan; foc
         <button className="more-button" onClick={() => onEdit(debt)} aria-label={`Edit ${debt.name}`}>•••</button>
       </div>
       <strong className="debt-balance">{money.format(debt.balance)}</strong>
-      <p className="debt-apr">{debt.apr.toFixed(2)}% APR</p>
+      <p className="debt-apr">{debt.apr.toFixed(2)}% APR{debt.owner ? ` · ${debt.owner}` : ""}</p>
       <div className="mini-track" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div>
       <p className="progress-label">{progress}% paid off</p>
       <dl className="debt-meta">
@@ -292,6 +295,91 @@ function MilestoneTimeline({ plan, debts }: { plan: Plan; debts: Debt[] }) {
   );
 }
 
+/** Household totals split per cardholder. */
+function OwnerReport({ plan, debts, total }: { plan: Plan; debts: Debt[]; total: number }) {
+  const owners = useMemo(() => ownerBreakdown(plan, debts), [plan, debts]);
+
+  if (owners.length === 0) {
+    return <p className="panel-note">Add an account to see a breakdown.</p>;
+  }
+
+  const unnamed = owners.length === 1 && owners[0].owner === UNASSIGNED_OWNER;
+
+  return (
+    <>
+      {unnamed && (
+        <div className="insight">
+          <span aria-hidden="true">◆</span>
+          <div>
+            <strong>No cardholders assigned yet</strong>
+            <p>Open any account and set its cardholder. Once two or more people are named, this splits every total between them.</p>
+          </div>
+        </div>
+      )}
+
+      <div className="owner-grid">
+        {owners.map((summary) => {
+          const progress = summary.original > 0
+            ? Math.max(0, Math.min(100, Math.round((summary.paid / summary.original) * 100)))
+            : 0;
+          return (
+            <article key={summary.owner} className="owner-card">
+              <div className="owner-head">
+                <div>
+                  <p className="card-label">{summary.accounts} {summary.accounts === 1 ? "CARD" : "CARDS"}</p>
+                  <h3>{summary.owner}</h3>
+                </div>
+                <div className="owner-share">
+                  <strong>{Math.round(summary.share)}%</strong>
+                  <span>of household debt</span>
+                </div>
+              </div>
+
+              <strong className="owner-balance">{money.format(summary.balance)}</strong>
+              <div className="mini-track" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div>
+              <p className="progress-label">{progress}% paid off · {money.format(summary.paid)} down from {money.format(summary.original)}</p>
+
+              <dl className="owner-facts">
+                <div><dt>Minimums</dt><dd>{money2.format(summary.minimums)}</dd></div>
+                <div><dt>Interest ahead</dt><dd>{lifetimeLabel(plan, summary.interestAhead)}</dd></div>
+                <div><dt>All cards clear</dt><dd className="accent-value">{summary.clearedDate ? formatMonth(summary.clearedDate) : "—"}</dd></div>
+              </dl>
+
+              <ul className="owner-cards">
+                {[...summary.debts].sort((a, b) => b.balance - a.balance).map((debt) => (
+                  <li key={debt.id}>
+                    <i style={{ background: debt.accent }} />
+                    <span>{debt.name}</span>
+                    <b>{money.format(debt.balance)}</b>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="owner-split" role="img" aria-label="Share of household debt by cardholder">
+        {owners.filter((summary) => summary.balance > 0).map((summary) => (
+          <span
+            key={summary.owner}
+            style={{ width: `${total > 0 ? (summary.balance / total) * 100 : 0}%`, background: summary.debts[0]?.accent ?? "var(--primary)" }}
+            title={`${summary.owner}: ${money.format(summary.balance)}`}
+          />
+        ))}
+      </div>
+
+      <p className="estimate-note">
+        Everyone&apos;s cards are paid from one household snowball, so these figures come from the shared schedule
+        rather than from imagining each person paying alone. Interest is what each card actually costs under the
+        current plan &mdash; whoever holds the targeted card sees theirs fall fastest.
+      </p>
+    </>
+  );
+}
+
+type ReportBy = "total" | "owner";
+
 type ViewProps = {
   active: string;
   debts: Debt[];
@@ -312,6 +400,8 @@ type ViewProps = {
   onEditDebt: (debt: Debt) => void;
   onStrategyChange: (strategy: Strategy) => void;
   onNavigate: (view: string) => void;
+  reportBy: ReportBy;
+  onReportByChange: (mode: ReportBy) => void;
   sharedMode: boolean;
 };
 
@@ -319,7 +409,8 @@ function SecondaryView(props: ViewProps) {
   const {
     active, debts, extra, strategy, total, original, paid, progress,
     plan, baseline, faster, alternative, simExtra,
-    onUpdate, onSimulate, onAddDebt, onEditDebt, onStrategyChange, onNavigate, sharedMode,
+    onUpdate, onSimulate, onAddDebt, onEditDebt, onStrategyChange, onNavigate,
+    reportBy, onReportByChange, sharedMode,
   } = props;
 
   const [reminders, setReminders] = useState<Record<number, boolean>>(
@@ -357,7 +448,7 @@ function SecondaryView(props: ViewProps) {
                 <span className="account-mark">{debt.mark}</span>
                 <div className="account-main">
                   <div>
-                    <strong>{debt.name}</strong>
+                    <strong>{debt.name}{debt.owner && <b className="owner-tag">{debt.owner}</b>}</strong>
                     <span>{debt.apr.toFixed(2)}% APR · due the {debt.dueDay}{ordinal(debt.dueDay)} · costs {money2.format(monthlyInterest)} in interest this month</span>
                   </div>
                   <div className="account-progress" aria-hidden="true"><span style={{ width: `${debtProgress}%` }} /></div>
@@ -496,8 +587,19 @@ function SecondaryView(props: ViewProps) {
             <h2>What you have moved so far</h2>
             <p>Everything here comes from your own balances, rates, and payments — no estimates layered on top.</p>
           </div>
+          <div className="segmented" role="radiogroup" aria-label="Report grouping">
+            <button role="radio" aria-checked={reportBy === "total"} className={reportBy === "total" ? "on" : ""} onClick={() => onReportByChange("total")}>
+              Household total
+            </button>
+            <button role="radio" aria-checked={reportBy === "owner"} className={reportBy === "owner" ? "on" : ""} onClick={() => onReportByChange("owner")}>
+              By cardholder
+            </button>
+          </div>
         </div>
 
+        {reportBy === "owner" && <OwnerReport plan={plan} debts={debts} total={total} />}
+        {reportBy === "owner" ? null : (
+        <>
         <div className="progress-hero">
           <ProgressRing percent={progress} />
           <div className="progress-hero-copy">
@@ -574,6 +676,8 @@ function SecondaryView(props: ViewProps) {
           Projections assume today&apos;s balances, fixed APRs, fixed minimum payments, and on-time payments with no new charges.
           Card issuers usually recalculate minimums as balances fall and may compound daily, so real statements can differ by a small amount each month.
         </p>
+        </>
+        )}
       </section>
     );
   }
@@ -732,6 +836,7 @@ type DebtDraft = {
   dueDay: string;
   accent: string;
   mark: string;
+  owner: string;
 };
 
 const ACCENTS = ["#3f6d63", "#5b7fa6", "#a2704f", "#7a6b95", "#b0834a", "#6d8f5c"];
@@ -745,6 +850,7 @@ const EMPTY_DEBT_DRAFT: DebtDraft = {
   dueDay: "1",
   accent: ACCENTS[0],
   mark: "◆",
+  owner: "",
 };
 
 const NAV: [string, string][] = [
@@ -772,6 +878,7 @@ export default function Home({
   const [draftBalances, setDraftBalances] = useState<Record<number, string>>({});
   const [editingDebtId, setEditingDebtId] = useState<number | null>(null);
   const [debtDraft, setDebtDraft] = useState<DebtDraft>(EMPTY_DEBT_DRAFT);
+  const [reportBy, setReportBy] = useState<ReportBy>("total");
   const [toast, setToast] = useState("");
   const now = useClientNow();
 
@@ -816,6 +923,11 @@ export default function Home({
 
   const monthsSaved = Math.max(0, plan.monthCount - faster.monthCount);
   const interestSaved = Math.max(0, plan.totalInterest - faster.totalInterest);
+  // Real names only: "Unassigned" is a display fallback, not a suggestion.
+  const knownOwners = useMemo(
+    () => ownerNames(debts).filter((owner) => owner !== UNASSIGNED_OWNER),
+    [debts],
+  );
   const dueSoon = debts.filter((debt) => {
     const due = nextDueDate(debt.dueDay);
     return (due.getTime() - Date.now()) / 86400000 <= 7;
@@ -841,6 +953,7 @@ export default function Home({
       dueDay: debt.dueDay.toString(),
       accent: debt.accent,
       mark: debt.mark,
+      owner: debt.owner ?? "",
     } : { ...EMPTY_DEBT_DRAFT, accent: ACCENTS[debts.length % ACCENTS.length] });
     setModal("debt");
   }
@@ -869,6 +982,7 @@ export default function Home({
       dueDay,
       accent: debtDraft.accent,
       mark: debtDraft.mark || "◆",
+      owner: debtDraft.owner.trim().slice(0, 60) || undefined,
     };
     const updated = editingDebtId === null
       ? [...debts, nextDebt]
@@ -1102,6 +1216,8 @@ export default function Home({
             onEditDebt={openDebtEditor}
             onStrategyChange={changeStrategy}
             onNavigate={setActive}
+            reportBy={reportBy}
+            onReportByChange={setReportBy}
             sharedMode={Boolean(onSharedStateChange)}
           />
         )}
@@ -1141,8 +1257,21 @@ export default function Home({
                 <h2 id="modal-title">{editingDebtId === null ? "Add an account" : "Edit this account"}</h2>
                 <p className="modal-intro">These four numbers drive the whole forecast. Card numbers and bank logins are never requested.</p>
                 <div className="debt-editor-grid">
-                  <label className="wide-field">Account name
+                  <label>Account name
                     <input autoFocus value={debtDraft.name} maxLength={80} onChange={(event) => setDebtDraft({ ...debtDraft, name: event.target.value })} placeholder="Card or lender name" />
+                  </label>
+                  <label>Cardholder
+                    <input
+                      value={debtDraft.owner}
+                      maxLength={60}
+                      list="debt-owner-options"
+                      onChange={(event) => setDebtDraft({ ...debtDraft, owner: event.target.value })}
+                      placeholder="Whose card is this?"
+                    />
+                    <datalist id="debt-owner-options">
+                      {knownOwners.map((owner) => <option key={owner} value={owner} />)}
+                    </datalist>
+                    <small>Optional. Used to break reports down per person.</small>
                   </label>
                   <label>Current balance
                     <input type="number" inputMode="decimal" min="0" step="0.01" value={debtDraft.balance} onChange={(event) => setDebtDraft({ ...debtDraft, balance: event.target.value })} />

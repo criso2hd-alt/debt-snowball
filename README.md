@@ -19,6 +19,9 @@ connects to banks or transmits card details.
   the other order would cost or save
 - **Payoff timeline** showing the attack order, when each account clears, the
   interest it costs, and what its payment rolls into next
+- **Cardholders** — assign an owner to each account and report either as one
+  household total or split per person: cards held, balance, share of the total,
+  minimums, interest, and when that person's last card clears
 - **Balance-over-time chart** comparing minimums-only, your current plan, and a
   larger payment, with labelled axes, a hover readout, and a marker on the month
   each account disappears
@@ -47,6 +50,10 @@ The attack order is fixed once at the start of the plan rather than re-sorted
 each month, so the target does not flip mid-payoff. Arithmetic runs in whole
 cents. A plan whose payments cannot outpace its interest is reported as such
 instead of being silently truncated.
+
+Per-cardholder figures are read out of that same shared schedule rather than
+simulated per person. A household runs one snowball across everybody's cards,
+so simulating each owner alone would describe a plan nobody is following.
 
 Assumptions: fixed minimums, fixed APRs, monthly compounding, on-time payments,
 and no new charges. Issuers commonly recalculate minimums as balances fall and

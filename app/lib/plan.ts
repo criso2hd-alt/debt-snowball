@@ -19,7 +19,26 @@ export type Debt = {
   dueDay: number;
   accent: string;
   mark: string;
+  /** Whose card this is. Empty on accounts added before owners existed. */
+  owner?: string;
 };
+
+/** Shown wherever an account has no owner set. */
+export const UNASSIGNED_OWNER = "Unassigned";
+
+export function ownerOf(debt: Debt): string {
+  return debt.owner?.trim() || UNASSIGNED_OWNER;
+}
+
+/** Every distinct owner in use, real names first and "Unassigned" last. */
+export function ownerNames(debts: Debt[]): string[] {
+  const names = [...new Set(debts.map(ownerOf))];
+  return names.sort((a, b) => {
+    if (a === UNASSIGNED_OWNER) return 1;
+    if (b === UNASSIGNED_OWNER) return -1;
+    return a.localeCompare(b);
+  });
+}
 
 /** One debt's activity inside a single month. */
 export type DebtMonth = {
@@ -427,6 +446,68 @@ export function milestones(plan: Plan, debts: Debt[]): Milestone[] {
 /** The same milestones ordered by when they actually happen on the calendar. */
 export function milestonesByDate(plan: Plan, debts: Debt[]): Milestone[] {
   return milestones(plan, debts).sort((a, b) => a.month - b.month);
+}
+
+export type OwnerSummary = {
+  owner: string;
+  debts: Debt[];
+  accounts: number;
+  balance: number;
+  original: number;
+  paid: number;
+  minimums: number;
+  /** Share of the household's current balance, 0-100. */
+  share: number;
+  /** Interest these accounts cost under the shared household plan. */
+  interestAhead: number;
+  /** Month this owner's last account clears, from the shared schedule. */
+  clearedMonth: number | null;
+  clearedDate: Date | null;
+};
+
+/**
+ * Household totals split by whoever owns each card.
+ *
+ * The figures come out of the one shared schedule rather than from simulating
+ * each person separately: the snowball rolls payments across everybody's cards,
+ * so a per-owner simulation would describe a plan nobody is actually following.
+ */
+export function ownerBreakdown(plan: Plan, debts: Debt[]): OwnerSummary[] {
+  const interest = new Map<number, number>();
+  for (const month of plan.months) {
+    for (const row of month.debts) {
+      interest.set(row.id, (interest.get(row.id) ?? 0) + row.interest);
+    }
+  }
+
+  const total = debts.reduce((sum, debt) => sum + debt.balance, 0);
+
+  return ownerNames(debts).map((owner) => {
+    const owned = debts.filter((debt) => ownerOf(debt) === owner);
+    const balance = owned.reduce((sum, debt) => sum + debt.balance, 0);
+    const original = owned.reduce((sum, debt) => sum + debt.original, 0);
+
+    const months = owned
+      .map((debt) => plan.payoffMonth[debt.id])
+      .filter((month): month is number => typeof month === "number");
+    const clearedMonth = months.length === owned.length && months.length > 0
+      ? Math.max(...months)
+      : null;
+
+    return {
+      owner,
+      debts: owned,
+      accounts: owned.length,
+      balance,
+      original,
+      paid: Math.max(0, original - balance),
+      minimums: owned.reduce((sum, debt) => sum + debt.minimum, 0),
+      share: total > 0 ? (balance / total) * 100 : 0,
+      interestAhead: owned.reduce((sum, debt) => sum + (interest.get(debt.id) ?? 0), 0),
+      clearedMonth,
+      clearedDate: clearedMonth ? plan.months[clearedMonth - 1].date : null,
+    };
+  });
 }
 
 export function planCsv(plan: Plan, debts: Debt[]): string {

@@ -31,6 +31,7 @@ type Debt = {
   dueDay: number;
   accent: string;
   mark: string;
+  owner?: string;
 };
 
 type DebtState = {
@@ -317,6 +318,9 @@ function validateState(value: unknown): DebtState {
     if (typeof debt.mark !== "string" || debt.mark.length > 8) {
       throw new HttpError(400, "A debt symbol is invalid.");
     }
+    if (debt.owner !== undefined && (typeof debt.owner !== "string" || debt.owner.length > 60)) {
+      throw new HttpError(400, "A card owner is invalid.");
+    }
     return {
       id,
       name: debt.name.trim(),
@@ -327,6 +331,7 @@ function validateState(value: unknown): DebtState {
       dueDay: Math.trunc(finiteNumber(debt.dueDay, "Due day", 1, 31)),
       accent: debt.accent,
       mark: debt.mark,
+      owner: debt.owner?.trim() || undefined,
     };
   });
 

@@ -186,3 +186,66 @@ test("under snowball, attack order and payoff order agree", async () => {
   assert.deepEqual(order, [2, 3, 1]);
   assert.deepEqual(order, dates);
 });
+
+test("owner breakdown splits the household without inventing separate plans", async () => {
+  const { ownerBreakdown } = await import("../dist-test/plan.js");
+  // Round synthetic figures: 8,000 + 12,000 = 20,000, so the shares are an
+  // exact 40/60 and a wrong denominator would be obvious.
+  const debts = [
+    debt({ id: 1, name: "Card A", balance: 2000, original: 3000, apr: 20, minimum: 50, owner: "Alex" }),
+    debt({ id: 2, name: "Card B", balance: 6000, original: 8000, apr: 22, minimum: 150, owner: "Alex" }),
+    debt({ id: 3, name: "Card C", balance: 3000, original: 4000, apr: 24, minimum: 75, owner: "Jordan" }),
+    debt({ id: 4, name: "Card D", balance: 9000, original: 12000, apr: 18, minimum: 200, owner: "Jordan" }),
+  ];
+  const plan = buildPlan(debts, 150, "snowball");
+  const [alex, jordan] = ownerBreakdown(plan, debts);
+
+  assert.equal(alex.owner, "Alex");
+  assert.equal(alex.accounts, 2);
+  assert.equal(alex.balance, 8000);
+  assert.equal(alex.original, 11000);
+  assert.equal(alex.paid, 3000);
+  assert.equal(alex.minimums, 200);
+  assert.equal(alex.share, 40);
+  assert.equal(jordan.balance, 12000);
+  assert.equal(jordan.minimums, 275);
+  assert.equal(jordan.share, 60);
+
+  // Interest reconciles with the household plan rather than being re-derived.
+  const combined = alex.interestAhead + jordan.interestAhead;
+  assert.ok(Math.abs(combined - plan.totalInterest) < 0.02, `owner interest ${combined} vs plan ${plan.totalInterest}`);
+
+  // Each owner clears when the last of their own cards does.
+  assert.equal(alex.clearedMonth, Math.max(plan.payoffMonth[1], plan.payoffMonth[2]));
+  assert.equal(jordan.clearedMonth, Math.max(plan.payoffMonth[3], plan.payoffMonth[4]));
+});
+
+test("accounts with no owner fall back to a single Unassigned group", async () => {
+  const { ownerBreakdown, ownerNames, ownerOf, UNASSIGNED_OWNER } = await import("../dist-test/plan.js");
+  const debts = [
+    debt({ id: 1, balance: 1200, original: 2000, minimum: 45 }),
+    debt({ id: 2, balance: 3400, original: 4000, minimum: 90 }),
+  ];
+  assert.equal(ownerOf(debts[0]), UNASSIGNED_OWNER);
+  assert.deepEqual(ownerNames(debts), [UNASSIGNED_OWNER]);
+
+  const summaries = ownerBreakdown(buildPlan(debts, 100), debts);
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].owner, UNASSIGNED_OWNER);
+  assert.equal(summaries[0].accounts, 2);
+  assert.equal(summaries[0].share, 100);
+});
+
+test("blank and whitespace owners are treated as unassigned, and sort last", async () => {
+  const { ownerNames, ownerOf, UNASSIGNED_OWNER } = await import("../dist-test/plan.js");
+  assert.equal(ownerOf(debt({ owner: "   " })), UNASSIGNED_OWNER);
+  assert.equal(ownerOf(debt({ owner: "" })), UNASSIGNED_OWNER);
+  assert.equal(ownerOf(debt({ owner: " Alex " })), "Alex");
+
+  const mixed = [
+    debt({ id: 1, owner: "Jordan" }),
+    debt({ id: 2 }),
+    debt({ id: 3, owner: "Alex" }),
+  ];
+  assert.deepEqual(ownerNames(mixed), ["Alex", "Jordan", UNASSIGNED_OWNER]);
+});

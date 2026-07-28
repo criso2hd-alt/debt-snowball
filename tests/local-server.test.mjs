@@ -95,12 +95,51 @@ test("protects and shares LAN data across managed users", async (context) => {
         ...initialState.payload.state,
         extra: 333,
         strategy: "avalanche",
+        debts: [
+          {
+            id: 1,
+            name: "Shared card",
+            balance: 1000,
+            original: 2000,
+            apr: 19.99,
+            minimum: 40,
+            dueDay: 9,
+            accent: "#3d6b5f",
+            mark: "S",
+            owner: "Alex",
+          },
+          {
+            id: 2,
+            name: "Unowned card",
+            balance: 500,
+            original: 900,
+            apr: 21.5,
+            minimum: 25,
+            dueDay: 17,
+            accent: "#a2704f",
+            mark: "U",
+          },
+        ],
       },
     },
   });
   assert.equal(savedState.response.status, 200);
   assert.equal(savedState.payload.state.extra, 333);
   assert.equal(savedState.payload.state.strategy, "avalanche");
+  assert.equal(savedState.payload.state.debts[0].owner, "Alex");
+  assert.equal(savedState.payload.state.debts[1].owner, undefined);
+
+  const badOwner = await request(baseUrl, "/api/state", {
+    method: "PUT",
+    cookie: adminCookie,
+    body: {
+      state: {
+        ...savedState.payload.state,
+        debts: [{ ...savedState.payload.state.debts[0], owner: "x".repeat(61) }],
+      },
+    },
+  });
+  assert.equal(badOwner.response.status, 400);
 
   const savedFile = await request(baseUrl, "/api/data-file/save", {
     method: "POST",
@@ -124,6 +163,7 @@ test("protects and shares LAN data across managed users", async (context) => {
   assert.equal(restoredState.response.status, 200);
   assert.equal(restoredState.payload.state.extra, 333);
   assert.equal(restoredState.payload.state.strategy, "avalanche");
+  assert.equal(restoredState.payload.state.debts[0].owner, "Alex", "card owners must survive a .dat round trip");
 
   const created = await request(baseUrl, "/api/users", {
     method: "POST",

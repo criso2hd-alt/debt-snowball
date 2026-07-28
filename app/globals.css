@@ -682,10 +682,14 @@ button { color: inherit; }
   color: var(--paper); background: var(--accent);
   font-size: var(--fs-base);
 }
-.account-mark { grid-area: mark; }
-.account-main { grid-area: main; min-width: 0; }
-.account-stats { grid-area: stats; display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)); gap: 14px; }
+/* Named areas belong to the account rows only. .account-mark is reused by the
+   reminder list, which has no such areas — leaving these unscoped dropped that
+   mark into an implicit cell and collapsed the row. */
+.account-list article > .account-mark { grid-area: mark; }
+.account-list .account-main { grid-area: main; }
+.account-list .account-stats { grid-area: stats; display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)); gap: 14px; }
 .account-list article > button { grid-area: edit; }
+.account-main { min-width: 0; }
 .account-main > div:first-child { display: flex; flex-direction: column; gap: 2px; }
 .account-main strong { font-size: var(--fs-base); font-weight: 650; }
 .account-main span { color: var(--muted); font-size: var(--fs-xs); }
@@ -974,6 +978,65 @@ button { color: inherit; }
 .milestone-strip span { color: var(--muted); font-size: var(--fs-xs); }
 
 .estimate-note { max-width: 84ch; margin: 18px 2px 0; color: var(--muted-2); font-size: var(--fs-sm); line-height: 1.6; }
+
+/* ---------------------------------------------------------- by cardholder */
+
+.segmented { display: flex; flex: 0 0 auto; padding: 3px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper-2); }
+.segmented button {
+  padding: 8px 15px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  font-size: var(--fs-sm); font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.segmented button.on { background: var(--paper); color: var(--ink); box-shadow: var(--shadow); }
+
+.owner-tag {
+  margin-left: 8px; padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--primary-deep); background: var(--primary-soft);
+  font-size: var(--fs-xs); font-weight: 650;
+  vertical-align: middle;
+}
+
+.owner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.owner-card {
+  display: flex; flex-direction: column;
+  padding: 20px;
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.owner-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.owner-head h3 { margin: 2px 0 0; font-size: var(--fs-lg); font-weight: 650; letter-spacing: -.4px; }
+.owner-share { text-align: right; flex: 0 0 auto; }
+.owner-share strong { display: block; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+.owner-share span { color: var(--muted); font-size: var(--fs-xs); }
+.owner-balance { display: block; margin-top: 14px; font-size: var(--fs-xl); letter-spacing: -.9px; font-variant-numeric: tabular-nums; }
+
+.owner-facts { display: flex; flex-direction: column; margin: 4px 0 0; }
+.owner-facts > div {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.owner-facts dt { color: var(--muted); font-size: var(--fs-sm); }
+.owner-facts dd { margin: 0; font-size: var(--fs-sm); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.owner-cards { list-style: none; display: flex; flex-direction: column; gap: 7px; margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--line-soft); }
+.owner-cards li { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); }
+.owner-cards i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 3px; }
+.owner-cards span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.owner-cards b { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.owner-split {
+  display: flex; gap: 3px;
+  height: 12px; margin-top: 16px;
+  overflow: hidden; border-radius: 99px;
+  background: var(--line-soft);
+}
+.owner-split span { display: block; height: 100%; border-radius: 99px; }
 
 /* -------------------------------------------------------------- reminders */
 
@@ -1277,7 +1340,7 @@ button { color: inherit; }
   .insight button { grid-column: 2; justify-self: start; }
   .reminder-list article { grid-template-columns: 40px 1fr 44px; }
   .reminder-chips { display: none; }
-  .account-stats { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  .account-list .account-stats { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
   .progress-hero { grid-template-columns: 1fr; gap: 18px; }
   .privacy-panel { flex-direction: column; align-items: flex-start; }
   .privacy-panel button { width: 100%; }
