@@ -61,7 +61,7 @@ try {
   assert.equal(saveFile.status, 200);
   const savedPortableData = JSON.parse(await readFile(portableData, "utf8"));
   assert.equal(savedPortableData.application, "Debt Squasher");
-  assert.deepEqual(savedPortableData.state, { debts: [], extra: 0 });
+  assert.deepEqual(savedPortableData.state, { debts: [], extra: 0, strategy: "snowball" });
   console.log(`Executable smoke test passed at ${baseUrl}`);
 } finally {
   child.kill("SIGTERM");
