@@ -3,6 +3,8 @@
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import TrajectoryChart, { type Series } from "./components/TrajectoryChart";
 import Schedule from "./components/Schedule";
+import SupportBanner from "./components/SupportBanner";
+import UpdatePanel from "./components/UpdatePanel";
 import {
   type Debt,
   type Plan,
@@ -764,6 +766,7 @@ function SecondaryView(props: ViewProps) {
           <span className="setting-value">Monthly</span>
         </article>
       </div>
+      <UpdatePanel />
       <article className="privacy-panel">
         <div>
           <strong>Why there is no bank sync</strong>
@@ -1089,6 +1092,7 @@ export default function Home({
         {active === "Overview" ? (
           <>
             <PlanWarnings plan={plan} onFix={() => setModal("simulator")} />
+            <SupportBanner />
 
             <section className="hero-grid">
               <article className="panel standing-card">

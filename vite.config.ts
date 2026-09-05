@@ -1,7 +1,20 @@
+import { existsSync, readFileSync } from "node:fs";
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
+
+const packageVersion: string = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version;
+
+/**
+ * The Sites project identity is account-specific and is not tracked, so a
+ * fresh clone builds against empty bindings instead of failing to resolve it.
+ */
+const hostingConfigPath = new URL("./.openai/hosting.json", import.meta.url);
+const hostingConfig: { d1?: string | null; r2?: string | null } = existsSync(hostingConfigPath)
+  ? JSON.parse(readFileSync(hostingConfigPath, "utf8"))
+  : { d1: null, r2: null };
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -50,6 +63,9 @@ export default defineConfig(async () => {
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),
+    },
+    define: {
+      __APP_VERSION__: JSON.stringify(packageVersion),
     },
     plugins: [
       vinext(),

@@ -83,7 +83,7 @@ public/               Static assets
 scripts/              Install, build, environment, and artifact helpers
 tests/                Rendered-worker smoke tests
 worker/               Cloudflare Worker entry point
-.openai/hosting.json  Existing OpenAI Sites project identity
+.openai/hosting.json  Sites project identity (local only, not tracked)
 ```
 
 The main product code is currently concentrated in:
@@ -164,20 +164,54 @@ calculation tests while iterating:
 npm run test:plan
 ```
 
+## Support
+
+If this saved you money or made the plan legible, you can
+[buy me a coffee](https://buymeacoffee.com/criso2hdj). The app is free, has no
+ads, and collects nothing.
+
+The in-app banner draws its own button rather than loading Buy Me a Coffee's
+CDN image, so opening the dashboard makes no third-party request. The banner
+can be dismissed permanently.
+
+## Updates
+
+**Settings → Check for updates** compares the running version against the
+latest GitHub release and links to the download.
+
+The check is manual by design. This app holds financial data and otherwise
+makes no network requests at all, so it does not poll in the background or
+ping anything at launch. Pressing the button sends one request to
+`api.github.com` and transmits nothing about your plan — no balances, no
+account names, no totals.
+
+Updating is a manual download-and-replace. The app deliberately does not
+overwrite its own binary: the running executable is locked on Windows, the
+builds are unsigned, and there is no signature verification, so silently
+replacing them would be a poor trade against the convenience. Your data lives
+outside the executable and survives an update untouched.
+
 ## Data and privacy
 
-Dashboard changes use the browser key `debt-snowball-state`. The app currently
-has no bank integration, card credential storage, analytics, or remote user
-database.
+Dashboard changes use the browser key `debt-snowball-state`. The app has no
+bank integration, card credential storage, analytics, telemetry, or remote user
+database. No balances or account details ever leave the machine.
+
+Nothing personal is committed to this repository. Balances live in browser
+storage, in `%LOCALAPPDATA%DebtSquasher` (macOS: `~/Library/Application
+Support/DebtSquasher`), or in a `DebtSquasherData.dat` you save yourself. All
+of those paths are gitignored. **Do not commit a `.dat` file or share one
+alongside the executable** — it contains your plan.
 
 Payoff figures are planning estimates. Actual interest and payoff timing can
 vary by issuer, statement cycle, fees, and payment date.
 
 ## Hosting notes
 
-The `.openai/hosting.json` file associates this checkout with its existing
-OpenAI Sites project. Keep it when updating that project. Remove it only when
-intentionally creating a separate, unconnected site.
+The `.openai/hosting.json` file associates a checkout with an OpenAI Sites
+project. It is account-specific and is **not tracked**, so it never appears in
+this repository. Keep your local copy if you deploy to Sites. A clone without
+it builds normally against empty bindings.
 
 The app runs on Vinext with a Cloudflare Worker entry point. Optional D1 and R2
 bindings are declared through `.openai/hosting.json` and mirrored for local
