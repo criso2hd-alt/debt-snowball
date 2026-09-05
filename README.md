@@ -25,25 +25,15 @@ full guide, the maths behind it, and troubleshooting.
 
 > Every figure in these screenshots comes from a fictional sample household.
 
----
-
-## Why this exists
-
-Debt is not just a number. It is the thing you think about at 2am. It is the
-statement you do not open, the payment you are not sure cleared, the vague
-certainty that you are losing ground without knowing how fast.
-
-The cruelty of credit-card debt is that it is *designed* to be illegible. The
-minimum payment on a $6,000 balance at 20% feels manageable at $170 a month. It
-is not. That payment is roughly **$100 of interest and $70 of actual progress**.
-Left on minimums, that single card takes decades and costs more in interest than
-you originally borrowed. Nothing on the statement tells you this.
-
-This app exists to make the number legible. Not to shame you, not to sell you a
-consolidation loan, just to show you the truth and the shortest way out.
-
-Seeing the whole thing written down is the part that helps. Once there is a date
-on the calendar, the debt stops being a fog and becomes a schedule.
+**Take the tour:**
+[Overview](#overview-what-to-do-this-month) ·
+[Accounts](#accounts-your-balances) ·
+[Payoff Plan](#payoff-plan-the-order-you-clear-them-in) ·
+[Schedule](#schedule-the-full-amortization) ·
+[Progress](#progress-what-you-have-moved) ·
+[By cardholder](#progress-by-cardholder-for-households) ·
+[Reminders](#reminders-due-dates) ·
+[Settings](#settings-strategy-privacy-updates)
 
 ---
 
@@ -125,6 +115,26 @@ progress.
 
 Switch strategy, adjust your monthly extra, and check for updates. It also
 explains exactly where your data lives and why there is no bank sync.
+
+---
+
+## Why this exists
+
+Debt is not just a number. It is the thing you think about at 2am. It is the
+statement you do not open, the payment you are not sure cleared, the vague
+certainty that you are losing ground without knowing how fast.
+
+The cruelty of credit-card debt is that it is *designed* to be illegible. The
+minimum payment on a $6,000 balance at 20% feels manageable at $170 a month. It
+is not. That payment is roughly **$100 of interest and $70 of actual progress**.
+Left on minimums, that single card takes decades and costs more in interest than
+you originally borrowed. Nothing on the statement tells you this.
+
+This app exists to make the number legible. Not to shame you, not to sell you a
+consolidation loan, just to show you the truth and the shortest way out.
+
+Seeing the whole thing written down is the part that helps. Once there is a date
+on the calendar, the debt stops being a fog and becomes a schedule.
 
 ---
 
