@@ -4,12 +4,13 @@
 balances, rates, minimums and due dates, and it tells you exactly what to pay,
 when to pay it, and the month you will finally be free.
 
-No bank logins. No card numbers. No accounts, ads, analytics or telemetry.
-Nothing about your money ever leaves your machine.
+Free and open source. No bank logins. No card numbers. No accounts, ads,
+analytics or telemetry. Nothing about your money ever leaves your machine.
 
 [![Use it in your browser](https://img.shields.io/badge/use_it_in_your_browser-3d6b5f?style=for-the-badge)](https://criso2hd-alt.github.io/debt-snowball/)
 [![Download](https://img.shields.io/github/v/release/criso2hd-alt/debt-snowball?label=download&style=for-the-badge&color=555)](https://github.com/criso2hd-alt/debt-snowball/releases/latest)
 [![Buy me a coffee](https://img.shields.io/badge/buy_me_a_coffee-a2704f?style=for-the-badge&logo=buymeacoffee&logoColor=white)](https://buymeacoffee.com/criso2hdj)
+[![MIT licence](https://img.shields.io/badge/licence-MIT-555?style=for-the-badge)](LICENSE)
 
 > ### This app is free and always will be
 >
@@ -309,5 +310,5 @@ arithmetic problem that the industry profits from keeping opaque.
 
 ## License
 
-No open-source license has been selected. All rights are reserved unless a
-license is added later.
+[MIT](LICENSE) — free to use, modify, fork, redistribute, and build on,
+commercially or otherwise. Keep the copyright notice and you are fine.
