@@ -7,7 +7,8 @@ when to pay it, and the month you will finally be free.
 No bank logins. No card numbers. No accounts, ads, analytics or telemetry.
 Nothing about your money ever leaves your machine.
 
-[![Download](https://img.shields.io/github/v/release/criso2hd-alt/debt-snowball?label=download&style=for-the-badge&color=3d6b5f)](https://github.com/criso2hd-alt/debt-snowball/releases/latest)
+[![Use it in your browser](https://img.shields.io/badge/use_it_in_your_browser-3d6b5f?style=for-the-badge)](https://criso2hd-alt.github.io/debt-snowball/)
+[![Download](https://img.shields.io/github/v/release/criso2hd-alt/debt-snowball?label=download&style=for-the-badge&color=555)](https://github.com/criso2hd-alt/debt-snowball/releases/latest)
 [![Buy me a coffee](https://img.shields.io/badge/buy_me_a_coffee-a2704f?style=for-the-badge&logo=buymeacoffee&logoColor=white)](https://buymeacoffee.com/criso2hdj)
 
 > ### This app is free and always will be
@@ -139,6 +140,22 @@ on the calendar, the debt stops being a fog and becomes a schedule.
 ---
 
 ## Get it
+
+### Use it in your browser — nothing to install
+
+**[criso2hd-alt.github.io/debt-snowball](https://criso2hd-alt.github.io/debt-snowball/)**
+
+Works on any device with a browser: Windows, Mac, Linux, Android, iPhone. No
+download, no sign-up, no account.
+
+It runs entirely on your own machine. Your balances are saved in that browser's
+local storage and are never sent anywhere — there is no server holding your
+data, because there is no server at all.
+
+Two things to know: your plan is tied to **that browser on that device**, so it
+will not follow you to another computer, and clearing your browsing data will
+erase it. If you want your plan on several devices, or a backup file, use the
+desktop app instead.
 
 ### Desktop app (Windows and macOS)
 
