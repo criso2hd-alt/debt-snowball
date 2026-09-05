@@ -62,3 +62,6 @@ dist-test/
 
 # Account-linked Sites project id: kept locally, not published
 /.openai/
+
+# Static web build output
+/web-dist/
