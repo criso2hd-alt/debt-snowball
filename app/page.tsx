@@ -1066,6 +1066,7 @@ export default function Home({
       </aside>
 
       <section className="main-area">
+        <SupportBanner />
         <header className="topbar">
           <div>
             <p className="eyebrow">{now ? now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase() : ""}</p>
@@ -1092,7 +1093,6 @@ export default function Home({
         {active === "Overview" ? (
           <>
             <PlanWarnings plan={plan} onFix={() => setModal("simulator")} />
-            <SupportBanner />
 
             <section className="hero-grid">
               <article className="panel standing-card">

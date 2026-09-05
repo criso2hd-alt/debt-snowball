@@ -22,7 +22,8 @@
     "test:local": "npm run build:local-runtime && node --test tests/local-server.test.mjs tests/lifecycle.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
@@ -43,6 +44,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "postject": "^1.0.0-alpha.6",
+    "puppeteer-core": "^25.10.0",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "tar": "^7.5.22",
